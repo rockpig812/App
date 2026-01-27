@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "863696538947",
+    "project_id": "couple-finance-pig",
+    "storage_bucket": "couple-finance-pig.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:863696538947:android:978fe46a1181fd67e733f6",
+        "android_client_info": {
+          "package_name": "com.example.app_test"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAP9qQ0hp0dFE-8LzduG4_xdFplt8e_oUM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
