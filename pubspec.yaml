@@ -41,6 +41,9 @@ dependencies:
   
   # 雲端資料庫 (處理記帳紀錄存取)
   cloud_firestore: ^6.1.2
+  
+  # 狀態管理
+  provider: ^6.1.2
 
 dev_dependencies:
   flutter_test:
