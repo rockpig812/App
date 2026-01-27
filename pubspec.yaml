@@ -31,10 +31,15 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  
+  # Firebase 核心
   firebase_core: ^4.4.0
+  
+  # 身份驗證 (處理登入、UID 獲取) —— 這是你缺少的
+  firebase_auth: 6.1.4
+  
+  # 雲端資料庫 (處理記帳紀錄存取)
   cloud_firestore: ^6.1.2
 
 dev_dependencies:
