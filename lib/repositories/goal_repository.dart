@@ -67,7 +67,6 @@ class GoalRepository {
   }
 
   /// 新增存入紀錄 (Contribution)
-  /// 這會同時更新 Goal 的 current_amount
   Future<String> addContribution({
     required String coupleId,
     required String goalId,
@@ -75,30 +74,14 @@ class GoalRepository {
     required double amount,
     required DateTime date,
   }) async {
-    // 1. 新增存入紀錄
-    final contributionId = await _firestoreService.addContribution(
-      coupleId,
-      goalId,
-      ContributionModel(
-        id: '',
-        goalId: goalId,
-        userId: userId,
-        amount: amount,
-        date: date,
-      ).toMap(),
+    // 使用 Firestore Transaction 以原子方式：新增 contribution + 遞增 current_amount
+    return _firestoreService.addContributionAndIncrementGoal(
+      coupleId: coupleId,
+      goalId: goalId,
+      userId: userId,
+      amount: amount,
+      date: date,
     );
-
-    // 2. 更新 Goal 的 current_amount
-    final goal = await getGoal(coupleId, goalId);
-    if (goal != null) {
-      await updateGoal(
-        coupleId: coupleId,
-        goalId: goalId,
-        currentAmount: goal.currentAmount + amount,
-      );
-    }
-
-    return contributionId;
   }
 
   /// 快速存入 (使用 monthly_recurrence_amount)

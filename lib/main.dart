@@ -7,6 +7,7 @@ import 'providers/session_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/pairing_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
+import 'screens/savings/savings_screen.dart';
 
 Future<void> main() async {
   // Firebase 初始化：在使用任何 Firebase 服務前一定要先做這步
@@ -62,6 +63,48 @@ class _RootRouter extends StatelessWidget {
       return const PairingScreen();
     }
 
-    return const DashboardScreen();
+    return const _HomeShell();
+  }
+}
+
+/// App 內部主框架：底部有 Expenses / Savings 的 BottomNavigationBar
+class _HomeShell extends StatefulWidget {
+  const _HomeShell();
+
+  @override
+  State<_HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<_HomeShell> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      const DashboardScreen(),
+      const SavingsScreen(),
+    ];
+
+    return Scaffold(
+      body: pages[_index],
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
+            label: 'Expenses',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.savings_outlined),
+            selectedIcon: Icon(Icons.savings),
+            label: 'Savings',
+          ),
+        ],
+        onDestinationSelected: (i) {
+          setState(() => _index = i);
+        },
+      ),
+    );
   }
 }

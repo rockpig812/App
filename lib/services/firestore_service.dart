@@ -202,4 +202,40 @@ class FirestoreService {
         .orderBy('date', descending: true)
         .snapshots();
   }
+
+  /// 以原子方式：對目標存入一筆金額 + 新增 contributions 紀錄
+  Future<String> addContributionAndIncrementGoal({
+    required String coupleId,
+    required String goalId,
+    required String userId,
+    required double amount,
+    required DateTime date,
+  }) async {
+    final goalRef =
+        _firestore.collection('couples').doc(coupleId).collection('goals').doc(goalId);
+    final contribRef = goalRef.collection('contributions').doc();
+
+    await _firestore.runTransaction((txn) async {
+      // 1) 讀取現有 goal（若不存在會丟錯）
+      final goalSnap = await txn.get(goalRef);
+      if (!goalSnap.exists) {
+        throw StateError('Goal not found');
+      }
+
+      // 2) 新增 contribution
+      txn.set(contribRef, {
+        'goal_id': goalId,
+        'user_id': userId,
+        'amount': amount,
+        'date': Timestamp.fromDate(date),
+      });
+
+      // 3) 原子遞增 current_amount
+      txn.update(goalRef, {
+        'current_amount': FieldValue.increment(amount),
+      });
+    });
+
+    return contribRef.id;
+  }
 }
