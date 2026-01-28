@@ -1,12 +1,10 @@
 import '../models/transaction_model.dart';
 import '../services/firestore_service.dart';
-import '../repositories/couple_repository.dart';
 
 /// TransactionRepository
 /// 處理所有與「交易紀錄」相關的業務邏輯
 class TransactionRepository {
   final FirestoreService _firestoreService = FirestoreService();
-  final CoupleRepository _coupleRepository = CoupleRepository();
 
   /// 新增交易
   /// 這會同時更新 Couple 的 total_balance
@@ -19,29 +17,24 @@ class TransactionRepository {
     String category = '其他',
     String splitType = 'equal',
   }) async {
-    // 1. 新增交易紀錄到 Firestore
-    final transactionId = await _firestoreService.addTransaction(
-      coupleId,
-      TransactionModel(
-        id: '', // 會在 addTransaction 中產生
-        coupleId: coupleId,
-        payerId: payerId,
-        amount: amount,
-        title: title,
-        date: date,
-        category: category,
-        splitType: splitType,
-      ).toMap(),
-    );
-
-    // 2. 更新 Couple 的總餘額
-    await _coupleRepository.updateTotalBalance(
+    final tx = TransactionModel(
+      id: '',
       coupleId: coupleId,
       payerId: payerId,
       amount: amount,
+      title: title,
+      date: date,
+      category: category,
+      splitType: splitType,
     );
 
-    return transactionId;
+    // CRITICAL: 原子操作（新增交易 + 增加 total_balance）
+    return _firestoreService.addTransactionAndIncrementBalance(
+      coupleId: coupleId,
+      payerId: payerId,
+      amount: amount,
+      transactionData: tx.toMap(),
+    );
   }
 
   /// 監聽交易列表
@@ -61,14 +54,8 @@ class TransactionRepository {
     required String payerId,
     required double amount,
   }) async {
-    // 1. 刪除交易
+    // MVP: 先保留刪除交易不做 total_balance 回滾（避免歷史修正帶來複雜度）
+    // Phase 3 的核心是「新增」要原子且即時更新。
     await _firestoreService.deleteTransaction(coupleId, transactionId);
-
-    // 2. 減少總餘額 (負數表示減少)
-    await _coupleRepository.updateTotalBalance(
-      coupleId: coupleId,
-      payerId: payerId,
-      amount: -amount,
-    );
   }
 }

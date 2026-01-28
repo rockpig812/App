@@ -41,6 +41,15 @@ class SessionProvider with ChangeNotifier {
   bool get isLoggedIn => _firebaseUser != null;
   bool get isPaired => (_profile?.currentCoupleId != null);
 
+  /// 監聽目前 couple 文件（供 Dashboard / AddTransaction one-shot 取 partner uid）
+  Stream<DocumentSnapshot<Map<String, dynamic>>> watchCurrentCoupleDoc() {
+    final coupleId = _profile?.currentCoupleId;
+    if (coupleId == null) {
+      return const Stream.empty();
+    }
+    return _firestore.firestore.collection('couples').doc(coupleId).snapshots();
+  }
+
   Future<void> _onAuthChanged(User? user) async {
     _error = null;
     _firebaseUser = user;

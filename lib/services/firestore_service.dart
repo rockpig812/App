@@ -6,6 +6,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class FirestoreService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  FirebaseFirestore get firestore => _firestore;
+
   // ========== Users Collection ==========
 
   /// 建立或更新使用者資料
@@ -73,6 +75,31 @@ class FirestoreService {
         .collection('transactions')
         .add(data);
     return docRef.id;
+  }
+
+  /// 以「原子操作」新增交易 + 更新 couples.total_balance[payerId]
+  /// - 使用 Firestore Transaction，確保兩步驟要嘛都成功，要嘛都失敗
+  /// - UI 不需要知道 total_balance 如何維護，只要顯示即可
+  Future<String> addTransactionAndIncrementBalance({
+    required String coupleId,
+    required String payerId,
+    required double amount,
+    required Map<String, dynamic> transactionData,
+  }) async {
+    final coupleRef = _firestore.collection('couples').doc(coupleId);
+    final txRef = coupleRef.collection('transactions').doc(); // 先拿到自動 ID
+
+    await _firestore.runTransaction((txn) async {
+      // 1) 新增交易文件
+      txn.set(txRef, transactionData);
+
+      // 2) 原子更新 total_balance.<payerId> (不存在也會自動從 null 視為 0 再加)
+      txn.update(coupleRef, {
+        'total_balance.$payerId': FieldValue.increment(amount),
+      });
+    });
+
+    return txRef.id;
   }
 
   /// 取得交易列表 (依日期降序)
