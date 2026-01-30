@@ -44,6 +44,7 @@ dependencies:
   
   # 狀態管理
   provider: ^6.1.2
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:

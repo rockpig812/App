@@ -5,12 +5,14 @@ class CoupleModel {
   final String id;
   final List<String> userIds; // 兩個使用者的 UID
   final Map<String, double> totalBalance; // {uid1: paid_total, uid2: paid_total}
+  final double jointPotBalance; // 公基金總額
   final String? inviteCode; // 6 位數邀請碼
 
   CoupleModel({
     required this.id,
     required this.userIds,
     required this.totalBalance,
+    this.jointPotBalance = 0.0,
     this.inviteCode,
   });
 
@@ -25,6 +27,7 @@ class CoupleModel {
       id: id,
       userIds: List<String>.from(map['user_ids'] ?? []),
       totalBalance: balance,
+      jointPotBalance: (map['joint_pot_balance'] as num?)?.toDouble() ?? 0.0,
       inviteCode: map['invite_code'],
     );
   }
@@ -33,6 +36,7 @@ class CoupleModel {
     return {
       'user_ids': userIds,
       'total_balance': totalBalance,
+      'joint_pot_balance': jointPotBalance,
       if (inviteCode != null) 'invite_code': inviteCode,
     };
   }
@@ -61,12 +65,14 @@ class CoupleModel {
     String? id,
     List<String>? userIds,
     Map<String, double>? totalBalance,
+    double? jointPotBalance,
     String? inviteCode,
   }) {
     return CoupleModel(
       id: id ?? this.id,
       userIds: userIds ?? this.userIds,
       totalBalance: totalBalance ?? this.totalBalance,
+      jointPotBalance: jointPotBalance ?? this.jointPotBalance,
       inviteCode: inviteCode ?? this.inviteCode,
     );
   }

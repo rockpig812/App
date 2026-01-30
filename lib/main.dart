@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
+import 'services/firestore_service.dart';
 import 'providers/session_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/pairing_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
-import 'screens/savings/savings_screen.dart';
+import 'screens/joint_pot_screen.dart';
+import 'screens/goals_screen.dart';
 
 Future<void> main() async {
   // Firebase 初始化：在使用任何 Firebase 服務前一定要先做這步
@@ -18,6 +20,7 @@ Future<void> main() async {
   runApp(
     MultiProvider(
       providers: [
+        Provider(create: (_) => FirestoreService()),
         ChangeNotifierProvider(create: (_) => SessionProvider()),
       ],
       child: const MyApp(),
@@ -67,7 +70,7 @@ class _RootRouter extends StatelessWidget {
   }
 }
 
-/// App 內部主框架：底部有 Expenses / Savings 的 BottomNavigationBar
+/// App 內部主框架：底部有 Expenses / Pot / Goals 的 BottomNavigationBar
 class _HomeShell extends StatefulWidget {
   const _HomeShell();
 
@@ -80,9 +83,18 @@ class _HomeShellState extends State<_HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    final session = context.watch<SessionProvider>();
+    final coupleId = session.profile?.currentCoupleId ?? '';
+
+    // 若沒有 coupleId，理論上 _RootRouter 會擋住，但這裡多做一層保護
+    if (coupleId.isEmpty) {
+      return const Center(child: Text('Error: No Couple ID'));
+    }
+
     final pages = [
       const DashboardScreen(),
-      const SavingsScreen(),
+      JointPotScreen(coupleId: coupleId),
+      GoalsScreen(coupleId: coupleId),
     ];
 
     return Scaffold(
@@ -93,12 +105,17 @@ class _HomeShellState extends State<_HomeShell> {
           NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),
-            label: 'Expenses',
+            label: '分帳', // Expenses
           ),
           NavigationDestination(
-            icon: Icon(Icons.savings_outlined),
-            selectedIcon: Icon(Icons.savings),
-            label: 'Savings',
+            icon: Icon(Icons.account_balance_wallet_outlined),
+            selectedIcon: Icon(Icons.account_balance_wallet),
+            label: '公基金', // Joint Pot
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.flag_outlined),
+            selectedIcon: Icon(Icons.flag),
+            label: '目標', // Goals
           ),
         ],
         onDestinationSelected: (i) {

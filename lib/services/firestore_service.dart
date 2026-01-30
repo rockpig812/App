@@ -238,4 +238,192 @@ class FirestoreService {
 
     return contribRef.id;
   }
+
+  // ========== Joint Pot & Savings Transactions ==========
+
+  /// 執行存錢/提款交易 (原子操作)
+  /// 1. 新增 savings_transactions 紀錄
+  /// 2. 更新 couple.joint_pot_balance
+  Future<void> performSavingsTransaction({
+    required String coupleId,
+    required Map<String, dynamic> transactionData, // SavingsTransactionModel data
+  }) async {
+    final coupleRef = _firestore.collection('couples').doc(coupleId);
+    final txRef = coupleRef.collection('savings_transactions').doc();
+    final double amount = transactionData['amount'];
+
+    await _firestore.runTransaction((txn) async {
+      // 1. 新增交易紀錄
+      txn.set(txRef, transactionData);
+
+      // 2. 更新公基金餘額
+      txn.update(coupleRef, {
+        'joint_pot_balance': FieldValue.increment(amount),
+      });
+    });
+  }
+
+  /// 監聽公基金交易紀錄
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchSavingsTransactions(
+      String coupleId) {
+    return _firestore
+        .collection('couples')
+        .doc(coupleId)
+        .collection('savings_transactions')
+        .orderBy('date', descending: true)
+        .snapshots();
+  }
+
+  /// 達成目標 (原子操作)
+  /// 1. 檢查餘額是否足夠
+  /// 2. 扣除公基金餘額
+  /// 3. 新增 savings_transactions (支出)
+  /// 4. 更新 goal.status = 'achieved' (與 achieved_date)
+  Future<void> achieveGoal({
+    required String coupleId,
+    required String goalId,
+    required double targetAmount,
+    required String goalTitle,
+    required String userId,
+  }) async {
+    final coupleRef = _firestore.collection('couples').doc(coupleId);
+    final goalRef = coupleRef.collection('goals').doc(goalId);
+    final txRef = coupleRef.collection('savings_transactions').doc();
+
+    await _firestore.runTransaction((txn) async {
+      final coupleSnap = await txn.get(coupleRef);
+      if (!coupleSnap.exists) throw Exception("Couple not found");
+
+      final double currentBalance =
+          (coupleSnap.data()?['joint_pot_balance'] as num?)?.toDouble() ?? 0.0;
+
+      if (currentBalance < targetAmount) {
+        throw Exception("Insufficient funds");
+      }
+
+      // 1. 扣除金額
+      txn.update(coupleRef, {
+        'joint_pot_balance': FieldValue.increment(-targetAmount),
+      });
+
+      // 2. 新增交易紀錄
+      txn.set(txRef, {
+        'user_id': userId,
+        'amount': -targetAmount,
+        'title': 'Goal: $goalTitle',
+        'date': Timestamp.now(),
+        'is_goal_deduction': true,
+      });
+
+      // 3. 更新目標狀態
+      txn.update(goalRef, {
+        'status': 'achieved',
+        'achieved_date': Timestamp.now(),
+      });
+    });
+  }
+
+  /// 撤銷達成目標 (原子操作)
+  /// 1. 加回公基金餘額
+  /// 2. 刪除對應的 savings_transactions (這裡簡化為新增一筆補償入帳，或刪除該筆交易。
+  ///    若要刪除特定交易，需要知道該交易ID。但這裡可以做的簡單點：直接新增一筆「退款」紀錄，
+  ///    或者若要嚴格「還原」，需要查詢該筆 transaction。
+  ///    **修正策略**：為了資料完整性，我們採用「反向交易」：新增一筆 +amount 的紀錄，標題 "Refund: Goal"。
+  ///    同時把 goal 狀態改回 active。)
+  Future<void> undoAchieveGoal({
+    required String coupleId,
+    required String goalId,
+    required double amount,
+    required String goalTitle,
+    required String userId,
+  }) async {
+    final coupleRef = _firestore.collection('couples').doc(coupleId);
+    final goalRef = coupleRef.collection('goals').doc(goalId);
+    final txRef = coupleRef.collection('savings_transactions').doc();
+
+    await _firestore.runTransaction((txn) async {
+      // 1. 加回金額
+      txn.update(coupleRef, {
+        'joint_pot_balance': FieldValue.increment(amount),
+      });
+
+      // 2. 新增退款交易紀錄
+      txn.set(txRef, {
+        'user_id': userId,
+        'amount': amount,
+        'title': 'Refund: $goalTitle',
+        'date': Timestamp.now(),
+        'is_goal_deduction': true,
+      });
+
+      // 3. 更新目標狀態
+      txn.update(goalRef, {
+        'status': 'active',
+      });
+    });
+  }
+
+  /// 更新交易紀錄 (原子操作)
+  /// 1. 讀取舊交易 (取得 oldAmount)
+  /// 2. 計算差額 (newAmount - oldAmount)
+  /// 3. 更新交易文件
+  /// 4. 更新公基金餘額
+  Future<void> updateSavingsTransaction({
+    required String coupleId,
+    required String transactionId,
+    required Map<String, dynamic> newData, // 包含新的 amount, title, date 等
+  }) async {
+    final coupleRef = _firestore.collection('couples').doc(coupleId);
+    final txRef = coupleRef.collection('savings_transactions').doc(transactionId);
+    final double newAmount = newData['amount'];
+
+    await _firestore.runTransaction((txn) async {
+      // 1. 讀取舊交易
+      final txSnap = await txn.get(txRef);
+      if (!txSnap.exists) throw Exception("Transaction not found");
+
+      final oldAmount = (txSnap.data()?['amount'] as num?)?.toDouble() ?? 0.0;
+      final diff = newAmount - oldAmount;
+
+      // 2. 更新交易紀錄
+      txn.update(txRef, newData);
+
+      // 3. 更新公基金餘額 (只有金額變動時才需要)
+      if (diff != 0) {
+        txn.update(coupleRef, {
+          'joint_pot_balance': FieldValue.increment(diff),
+        });
+      }
+    });
+  }
+
+  /// 刪除交易紀錄 (原子操作)
+  /// 1. 讀取交易金 (取得 amount)
+  /// 2. 反向更新公基金餘額 (balance - amount)
+  /// 3. 刪除交易文件
+  Future<void> deleteSavingsTransaction({
+    required String coupleId,
+    required String transactionId,
+  }) async {
+    final coupleRef = _firestore.collection('couples').doc(coupleId);
+    final txRef = coupleRef.collection('savings_transactions').doc(transactionId);
+
+    await _firestore.runTransaction((txn) async {
+      // 1. 讀取交易
+      final txSnap = await txn.get(txRef);
+      if (!txSnap.exists) throw Exception("Transaction not found");
+
+      final amount = (txSnap.data()?['amount'] as num?)?.toDouble() ?? 0.0;
+
+      // 2. 反向更新餘額
+      // 如果原本是存 +1000，刪除後要 balance - 1000
+      // 如果原本是領 -500，刪除後要 balance - (-500) = balance + 500
+      txn.update(coupleRef, {
+        'joint_pot_balance': FieldValue.increment(-amount),
+      });
+
+      // 3. 刪除文件
+      txn.delete(txRef);
+    });
+  }
 }
