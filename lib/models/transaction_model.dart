@@ -9,7 +9,7 @@ class TransactionModel {
   final double amount;
   final String title;
   final DateTime date;
-  final String category;
+  final String category; // 'household', 'food', etc.
   final String splitType; // "equal" (均分) 或其他未來擴充類型
 
   TransactionModel({
@@ -19,7 +19,7 @@ class TransactionModel {
     required this.amount,
     required this.title,
     required this.date,
-    this.category = '其他',
+    this.category = 'other',
     this.splitType = 'equal',
   });
 
@@ -31,7 +31,7 @@ class TransactionModel {
       amount: (map['amount'] as num).toDouble(),
       title: map['title'] ?? '',
       date: (map['date'] as Timestamp).toDate(),
-      category: map['category'] ?? '其他',
+      category: map['category'] ?? 'other',
       splitType: map['split_type'] ?? 'equal',
     );
   }

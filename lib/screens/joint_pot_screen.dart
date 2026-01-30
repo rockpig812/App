@@ -7,6 +7,8 @@ import '../models/transaction_model.dart';
 import '../models/savings_transaction_model.dart';
 import '../services/firestore_service.dart';
 import '../providers/session_provider.dart';
+import '../models/category_model.dart';
+import '../widgets/category_selector.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class JointPotScreen extends StatelessWidget {
@@ -106,13 +108,13 @@ class JointPotScreen extends StatelessWidget {
             final transaction = SavingsTransactionModel.fromMap(data, docs[index].id);
             final isDeposit = transaction.amount >= 0;
 
+            final categoryId = transaction.category;
+            final category = TransactionCategory.getById(categoryId);
+
             return ListTile(
               leading: CircleAvatar(
-                backgroundColor: isDeposit ? Colors.green[100] : Colors.red[100],
-                child: Icon(
-                  isDeposit ? Icons.arrow_downward : Icons.arrow_upward,
-                  color: isDeposit ? Colors.green : Colors.red,
-                ),
+                backgroundColor: category.color.withOpacity(0.2),
+                child: Icon(category.icon, color: category.color),
               ),
               title: Text(transaction.title),
               subtitle: Text(DateFormat('yyyy/MM/dd HH:mm').format(transaction.date)),
@@ -225,8 +227,10 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
   final _amountController = TextEditingController();
   final _titleController = TextEditingController();
   DateTime _selectedDate = DateTime.now();
+  String _selectedCategory = 'household'; // Default for Pot
   bool _isDeposit = true;
   bool _isLoading = false;
+  bool _isRecurring = false; // "Repeat Monthly?"
 
   bool get _isEditing => widget.transaction != null;
 
@@ -239,6 +243,8 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
       _titleController.text = tx.title;
       _selectedDate = tx.date;
       _isDeposit = tx.amount >= 0;
+      _selectedCategory = tx.category;
+      _isRecurring = tx.isRecurring;
     }
   }
 
@@ -263,8 +269,6 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
-          // Toggle only if not editing (or allow editing type? usually better to keep simple)
-          // Let's allow editing type unless it feels wrong. For now allow it.
           Row(
             children: [
               Expanded(
@@ -293,6 +297,14 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
             ],
           ),
           const SizedBox(height: 10),
+          // Category Selector
+          Text('Category', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          CategorySelector(
+            selectedCategoryId: _selectedCategory,
+            onCategorySelected: (val) => setState(() => _selectedCategory = val),
+          ),
+          const SizedBox(height: 16),
           // Date Picker Row
           InkWell(
             onTap: _pickDateTime,
@@ -321,6 +333,15 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
             controller: _amountController,
             decoration: const InputDecoration(labelText: 'Amount'),
             keyboardType: TextInputType.numberWithOptions(decimal: true),
+          ),
+          const SizedBox(height: 10),
+          // Recurring Toggle (Only for withdrawals/spending typically, but let's allow all)
+          SwitchListTile(
+            title: const Text('Repeat Monthly?'),
+            subtitle: const Text('Useful for bills like Rent/Netflix'),
+            value: _isRecurring,
+            onChanged: (val) => setState(() => _isRecurring = val),
+            contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 20),
           ElevatedButton(
@@ -377,21 +398,22 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
       final service = context.read<FirestoreService>();
       final finalAmount = _isDeposit ? amount : -amount;
 
+      final commonData = {
+        'amount': finalAmount,
+        'title': title,
+        'date': Timestamp.fromDate(_selectedDate),
+        'category': _selectedCategory,
+        'is_recurring': _isRecurring,
+        'recurrence_interval': _isRecurring ? 'monthly' : null,
+      };
+
       if (_isEditing) {
-        // Update
-        final newData = {
-          'amount': finalAmount,
-          'title': title,
-          'date': Timestamp.fromDate(_selectedDate), // Ensure Timestamp
-          // 'user_id': ... keep original user or update? Keep original usually.
-        };
         await service.updateSavingsTransaction(
           coupleId: widget.coupleId,
           transactionId: widget.transaction!.id,
-          newData: newData,
+          newData: commonData,
         );
       } else {
-        // Create
         final transaction = SavingsTransactionModel(
           id: '',
           userId: user?.uid ?? '',
@@ -399,6 +421,9 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
           title: title,
           date: _selectedDate,
           isGoalDeduction: false,
+          category: _selectedCategory,
+          isRecurring: _isRecurring,
+          recurrenceInterval: _isRecurring ? 'monthly' : null,
         );
 
         await service.performSavingsTransaction(

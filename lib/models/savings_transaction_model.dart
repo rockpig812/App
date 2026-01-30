@@ -9,6 +9,9 @@ class SavingsTransactionModel {
   final String title;
   final DateTime date;
   final bool isGoalDeduction; // 是否為達成目標時的自動扣款
+  final String category;
+  final bool isRecurring;
+  final String? recurrenceInterval;
 
   SavingsTransactionModel({
     required this.id,
@@ -16,7 +19,10 @@ class SavingsTransactionModel {
     required this.amount,
     required this.title,
     required this.date,
-    this.isGoalDeduction = false,
+    required this.isGoalDeduction,
+    this.category = 'other',
+    this.isRecurring = false,
+    this.recurrenceInterval,
   });
 
   factory SavingsTransactionModel.fromMap(Map<String, dynamic> map, String id) {
@@ -27,6 +33,9 @@ class SavingsTransactionModel {
       title: map['title'] ?? '',
       date: (map['date'] as Timestamp).toDate(),
       isGoalDeduction: map['is_goal_deduction'] ?? false,
+      category: map['category'] ?? 'other',
+      isRecurring: map['is_recurring'] ?? false,
+      recurrenceInterval: map['recurrence_interval'],
     );
   }
 
@@ -37,6 +46,9 @@ class SavingsTransactionModel {
       'title': title,
       'date': Timestamp.fromDate(date),
       'is_goal_deduction': isGoalDeduction,
+      'category': category,
+      'is_recurring': isRecurring,
+      'recurrence_interval': recurrenceInterval,
     };
   }
 
@@ -47,6 +59,9 @@ class SavingsTransactionModel {
     String? title,
     DateTime? date,
     bool? isGoalDeduction,
+    String? category,
+    bool? isRecurring,
+    String? recurrenceInterval,
   }) {
     return SavingsTransactionModel(
       id: id ?? this.id,
@@ -55,6 +70,9 @@ class SavingsTransactionModel {
       title: title ?? this.title,
       date: date ?? this.date,
       isGoalDeduction: isGoalDeduction ?? this.isGoalDeduction,
+      category: category ?? this.category,
+      isRecurring: isRecurring ?? this.isRecurring,
+      recurrenceInterval: recurrenceInterval ?? this.recurrenceInterval,
     );
   }
 }

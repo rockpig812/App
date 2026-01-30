@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../providers/session_provider.dart';
 import '../../repositories/transaction_repository.dart';
+import '../../widgets/category_selector.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   const AddTransactionScreen({super.key});
@@ -21,6 +22,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   // true = me, false = partner
   bool _paidByMe = true;
+  String _selectedCategory = 'food'; // Default for Split Bill
 
   final _txRepo = TransactionRepository();
 
@@ -77,7 +79,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         amount: amount,
         title: title,
         date: _date,
-        category: '其他',
+        category: _selectedCategory,
         splitType: 'equal',
       );
 
@@ -126,6 +128,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   onPressed: _pickDate,
                   icon: const Icon(Icons.calendar_month),
                   label: Text('Date: ${_date.year}-${_date.month}-${_date.day}'),
+                ),
+                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+                Text('Category', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                CategorySelector(
+                  selectedCategoryId: _selectedCategory,
+                  onCategorySelected: (val) => setState(() => _selectedCategory = val),
                 ),
                 const SizedBox(height: 16),
                 Text('Who paid?', style: Theme.of(context).textTheme.titleMedium),
