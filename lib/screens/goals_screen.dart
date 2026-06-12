@@ -8,13 +8,57 @@ import '../services/firestore_service.dart';
 import '../providers/session_provider.dart';
 
 class GoalsScreen extends StatelessWidget {
-  const GoalsScreen({Key? key, required this.roomId}) : super(key: key);
+  const GoalsScreen({Key? key, required this.roomId, this.showAppBar = true}) : super(key: key);
 
   final String roomId;
+  final bool showAppBar;
 
   @override
   Widget build(BuildContext context) {
     final firestoreService = context.read<FirestoreService>();
+
+    final content = StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: firestoreService.watchGoals(roomId),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return const Center(child: Text('Error'));
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+        final docs = snapshot.data!.docs;
+        final allGoals = docs.map((doc) => GoalModel.fromMap(doc.data(), doc.id)).toList();
+
+        final activeGoals = allGoals.where((g) => g.status == 'active').toList();
+        final achievedGoals = allGoals.where((g) => g.status == 'achieved').toList();
+
+        achievedGoals.sort((a, b) {
+          if (a.achievedDate == null || b.achievedDate == null) return 0;
+          return b.achievedDate!.compareTo(a.achievedDate!);
+        });
+
+        return TabBarView(
+          children: [
+            _buildGoalList(context, activeGoals),
+            _buildGoalList(context, achievedGoals),
+          ],
+        );
+      },
+    );
+
+    if (!showAppBar) {
+      return DefaultTabController(
+        length: 2,
+        child: Column(
+          children: [
+            const TabBar(
+              tabs: [
+                Tab(text: '進行中'),
+                Tab(text: '已達成'),
+              ],
+            ),
+            Expanded(child: content),
+          ],
+        ),
+      );
+    }
 
     return DefaultTabController(
       length: 2,
@@ -28,31 +72,7 @@ class GoalsScreen extends StatelessWidget {
             ],
           ),
         ),
-        body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: firestoreService.watchGoals(roomId),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) return const Center(child: Text('Error'));
-            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-            final docs = snapshot.data!.docs;
-            final allGoals = docs.map((doc) => GoalModel.fromMap(doc.data(), doc.id)).toList();
-
-            final activeGoals = allGoals.where((g) => g.status == 'active').toList();
-            final achievedGoals = allGoals.where((g) => g.status == 'achieved').toList();
-
-            achievedGoals.sort((a, b) {
-              if (a.achievedDate == null || b.achievedDate == null) return 0;
-              return b.achievedDate!.compareTo(a.achievedDate!);
-            });
-
-            return TabBarView(
-              children: [
-                _buildGoalList(context, activeGoals),
-                _buildGoalList(context, achievedGoals),
-              ],
-            );
-          },
-        ),
+        body: content,
         floatingActionButton: FloatingActionButton(
           onPressed: () => _showAddGoalDialog(context),
           child: const Icon(Icons.add),
@@ -76,7 +96,7 @@ class GoalsScreen extends StatelessWidget {
   void _showAddGoalDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => _AddGoalDialog(roomId: roomId),
+      builder: (context) => AddGoalDialog(roomId: roomId),
     );
   }
 }
@@ -194,15 +214,15 @@ class _GoalCard extends StatelessWidget {
   }
 }
 
-class _AddGoalDialog extends StatefulWidget {
+class AddGoalDialog extends StatefulWidget {
   final String roomId;
-  const _AddGoalDialog({Key? key, required this.roomId}) : super(key: key);
+  const AddGoalDialog({Key? key, required this.roomId}) : super(key: key);
 
   @override
-  State<_AddGoalDialog> createState() => _AddGoalDialogState();
+  State<AddGoalDialog> createState() => _AddGoalDialogState();
 }
 
-class _AddGoalDialogState extends State<_AddGoalDialog> {
+class _AddGoalDialogState extends State<AddGoalDialog> {
   final _titleController = TextEditingController();
   final _amountController = TextEditingController();
   bool _isLoading = false;

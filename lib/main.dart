@@ -6,13 +6,16 @@ import 'firebase_options.dart';
 import 'services/firestore_service.dart';
 import 'providers/session_provider.dart';
 import 'providers/joint_pot_provider.dart';
+import 'providers/transaction_provider.dart';
 import 'repositories/joint_pot_repository.dart';
 import 'repositories/room_repository.dart';
+import 'repositories/transaction_repository.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/pairing_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/joint_pot_screen.dart';
 import 'screens/goals_screen.dart';
+import 'home_page.dart';
 
 Future<void> main() async {
   // Firebase 初始化：在使用任何 Firebase 服務前一定要先做這步
@@ -30,6 +33,32 @@ Future<void> main() async {
         ),
         ProxyProvider<FirestoreService, RoomRepository>(
           update: (_, service, __) => RoomRepository(),
+        ),
+        ChangeNotifierProxyProvider<SessionProvider, TransactionProvider>(
+          create: (context) => TransactionProvider(),
+          update: (context, session, provider) {
+            final roomId = session.profile?.lastActiveRoomId;
+            if (roomId != null && roomId.isNotEmpty) {
+              provider?.startWatching(roomId);
+            }
+            return provider!;
+          },
+        ),
+        ChangeNotifierProxyProvider<SessionProvider, JointPotProvider>(
+          create: (context) => JointPotProvider(
+            repository: context.read<JointPotRepository>(),
+            roomId: '',
+          ),
+          update: (context, session, provider) {
+            final roomId = session.profile?.lastActiveRoomId;
+            if (roomId != null && roomId.isNotEmpty && roomId != provider?.roomId) {
+              return JointPotProvider(
+                repository: context.read<JointPotRepository>(),
+                roomId: roomId,
+              );
+            }
+            return provider!;
+          },
         ),
       ],
       child: const MyApp(),
@@ -98,69 +127,8 @@ class _RootRouter extends StatelessWidget {
       return const PairingScreen();
     }
 
-    return const _HomeShell();
+    return const HomePage();
   }
 }
 
-/// App 內部主框架：底部有 Expenses / Pot / Goals 的 BottomNavigationBar
-class _HomeShell extends StatefulWidget {
-  const _HomeShell();
 
-  @override
-  State<_HomeShell> createState() => _HomeShellState();
-}
-
-class _HomeShellState extends State<_HomeShell> {
-  int _index = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final session = context.watch<SessionProvider>();
-    final roomId = session.profile?.lastActiveRoomId ?? '';
-
-    // 若沒有 roomId，理論上 _RootRouter 會擋住，但這裡多做一層保護
-    if (roomId.isEmpty) {
-      return const Center(child: Text('Error: No Room ID'));
-    }
-
-    final pages = [
-      const DashboardScreen(),
-      ChangeNotifierProvider(
-        key: ValueKey('room_$roomId'),
-        create: (context) => JointPotProvider(
-          repository: context.read<JointPotRepository>(),
-          roomId: roomId,
-        ),
-        child: const JointPotScreen(),
-      ),
-      GoalsScreen(roomId: roomId),
-    ];
-
-    return Scaffold(
-      body: pages[_index],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon: Icon(Icons.receipt_long),
-            label: '分帳', // Expenses
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.account_balance_wallet_outlined),
-            selectedIcon: Icon(Icons.account_balance_wallet),
-            label: '公基金', // Joint Pot
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.flag_outlined),
-            selectedIcon: Icon(Icons.flag),
-            label: '目標', // Goals
-          ),
-        ],
-        onDestinationSelected: (i) {
-          setState(() => _index = i);
-        },
-      ),
-    );
-  }
-}

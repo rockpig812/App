@@ -1,193 +1,291 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
 import '../../providers/session_provider.dart';
 import '../../providers/transaction_provider.dart';
-import '../../widgets/category_selector.dart';
+import '../../widgets/calculator_widget.dart';
+import '../../widgets/category_grid.dart';
+import '../../models/category_model.dart';
+import '../../models/transaction_model.dart';
 
 class AddTransactionScreen extends StatefulWidget {
-  const AddTransactionScreen({super.key});
+  final TransactionModel? existingTransaction;
+
+  const AddTransactionScreen({super.key, this.existingTransaction});
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
 }
 
 class _AddTransactionScreenState extends State<AddTransactionScreen> {
-  final _titleController = TextEditingController();
-  final _amountController = TextEditingController();
-  DateTime _date = DateTime.now();
-
-  bool _saving = false;
-  String? _error;
-
-  // For MVP: Default to current user. In a group, we might want a list.
-  String? _selectedPayerId;
-  String _selectedCategory = 'food';
+  late String _type; 
+  late DateTime _date;
+  late String _amountString;
+  late String _selectedCategoryId;
 
   @override
-  void dispose() {
-    _titleController.dispose();
-    _amountController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    if (widget.existingTransaction != null) {
+      final tx = widget.existingTransaction!;
+      _type = tx.amount >= 0 ? "支出" : "收入";
+      _date = tx.date;
+      _amountString = tx.amount.abs().toStringAsFixed(0);
+      _selectedCategoryId = tx.category;
+    } else {
+      _type = "支出";
+      _date = DateTime.now();
+      _amountString = "0";
+      _selectedCategoryId = 'food';
+    }
+  }
+
+  bool _isSaving = false;
+
+  void _onAmountChanged(String val) {
+    setState(() {
+      _amountString = val;
+    });
   }
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
+      initialDate: _date,
       firstDate: DateTime(now.year - 5),
       lastDate: DateTime(now.year + 5),
-      initialDate: _date,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.orange,
+              primary: Colors.orange,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
-    if (picked == null) return;
-    setState(() => _date = picked);
+    if (picked != null) {
+      setState(() => _date = picked);
+    }
   }
 
-  Future<void> _save() async {
+  Future<void> _handleSave(double finalAmount) async {
+    if (finalAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("請輸入大於 0 的金額")),
+      );
+      return;
+    }
+
     final session = context.read<SessionProvider>();
     final txProvider = context.read<TransactionProvider>();
     final myUid = session.firebaseUser?.uid;
     final roomId = session.profile?.lastActiveRoomId;
+
     if (myUid == null || roomId == null) return;
 
-    final title = _titleController.text.trim();
-    final amount = double.tryParse(_amountController.text.trim());
-
-    if (title.isEmpty || amount == null || amount <= 0) {
-      setState(() => _error = 'Please enter a valid title and amount.');
-      return;
-    }
-
-    final payerId = _selectedPayerId ?? myUid;
-
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
+    setState(() => _isSaving = true);
 
     try {
-      await txProvider.addTransaction(
-        roomId: roomId,
-        payerId: payerId,
-        amount: amount,
-        title: title,
-        date: _date,
-        category: _selectedCategory,
-        splitType: 'equal',
-      );
+      final actualAmount = _type == "支出" ? finalAmount : -finalAmount; 
+      final category = TransactionCategory.getById(_selectedCategoryId);
 
-      if (!mounted) return;
-      Navigator.of(context).pop();
+      if (widget.existingTransaction != null) {
+        await txProvider.updateTransaction(
+          roomId: roomId,
+          transactionId: widget.existingTransaction!.id,
+          payerId: myUid,
+          oldAmount: widget.existingTransaction!.amount,
+          newAmount: actualAmount,
+          title: category.label,
+          date: _date,
+          category: _selectedCategoryId,
+        );
+      } else {
+        await txProvider.addTransaction(
+          roomId: roomId,
+          payerId: myUid,
+          amount: actualAmount,
+          title: category.label, 
+          date: _date,
+          category: _selectedCategoryId,
+          splitType: 'equal',
+        );
+      }
+
+      if (mounted) Navigator.pop(context);
     } catch (e) {
-      setState(() => _error = e.toString());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("儲存失敗: $e")),
+      );
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionProvider>();
+    final txProvider = context.read<TransactionProvider>();
     final myUid = session.firebaseUser?.uid;
+    final roomId = session.profile?.lastActiveRoomId;
+
+    final colorScheme = Theme.of(context).colorScheme;
+    final category = TransactionCategory.getById(_selectedCategoryId);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Expense')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _titleController,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    border: OutlineInputBorder(),
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded, color: Colors.black54),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Container(
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildTypeTab("支出"),
+              _buildTypeTab("收入"),
+            ],
+          ),
+        ),
+        centerTitle: true,
+        actions: [
+          if (widget.existingTransaction != null && roomId != null && myUid != null)
+             IconButton(
+              icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+              onPressed: () {
+                txProvider.deleteTransaction(
+                  roomId: roomId,
+                  transactionId: widget.existingTransaction!.id,
+                  payerId: myUid,
+                  amount: widget.existingTransaction!.amount,
+                );
+                Navigator.pop(context);
+              },
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: InkWell(
+                      onTap: _pickDate,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.calendar_today_rounded, size: 12, color: Colors.orange),
+                          const SizedBox(width: 4),
+                          Text(
+                            "今日 ${DateFormat('yyyy/MM/dd').format(_date)}",
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54, fontSize: 13),
+                          ),
+                          const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Colors.black54),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _amountController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Amount',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _pickDate,
-                  icon: const Icon(Icons.calendar_month),
-                  label: Text('Date: ${_date.year}-${_date.month}-${_date.day}'),
-                ),
-                const SizedBox(height: 16),
-                Text('Category', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                CategorySelector(
-                  selectedCategoryId: _selectedCategory,
-                  onCategorySelected: (val) => setState(() => _selectedCategory = val),
-                ),
-                const SizedBox(height: 16),
-                
-                // For MVP: Simple toggle between Me and "Someone Else" (Partner)
-                // In the future, this should be a list of room members.
-                Text('Who paid?', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                  stream: session.watchCurrentRoomDoc(),
-                  builder: (context, snapshot) {
-                    final data = snapshot.data?.data();
-                    final userIds = List<String>.from(data?['user_ids'] ?? []);
-                    
-                    if (userIds.length <= 1) {
-                      return const Text('Paid by: Me (Personal Mode)');
-                    }
-
-                    return SegmentedButton<String>(
-                      segments: [
-                        const ButtonSegment(value: 'me', label: Text('Me')),
-                        const ButtonSegment(value: 'other', label: Text('Someone Else')),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: category.color.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(category.icon, color: category.color, size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          category.label,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        Text(
+                          "\$ $_amountString",
+                          style: TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.w900,
+                            color: _type == "支出" ? Colors.orange : Colors.blue,
+                          ),
+                        ),
                       ],
-                      selected: {(_selectedPayerId == null || _selectedPayerId == myUid) ? 'me' : 'other'},
-                      onSelectionChanged: (s) {
-                        if (s.first == 'me') {
-                          setState(() => _selectedPayerId = myUid);
-                        } else {
-                          // Pick the first non-me user as the "other" for now
-                          final otherUid = userIds.firstWhere((u) => u != myUid, orElse: () => myUid as String);
-                          setState(() => _selectedPayerId = otherUid);
-                        }
-                      },
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 16),
-                Text(
-                  'Split: Equal among all members',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const Spacer(),
-                if (_error != null) ...[
-                  Text(_error!, style: const TextStyle(color: Colors.red)),
-                  const SizedBox(height: 8),
-                ],
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: (_saving || !session.isJoinedRoom)
-                        ? null
-                        : _save,
-                    icon: const Icon(Icons.save),
-                    label: _saving ? const Text('Saving...') : const Text('Save'),
+                    ),
                   ),
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: CategoryGrid(
+                      selectedCategoryId: _selectedCategoryId,
+                      onCategorySelected: (id) {
+                        setState(() {
+                          _selectedCategoryId = id;
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
                 ),
               ],
             ),
+            child: SafeArea(
+              top: false,
+              child: CalculatorWidget(
+                onChanged: _onAmountChanged,
+                onSubmitted: _handleSave,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypeTab(String label) {
+    final isSelected = _type == label;
+    return GestureDetector(
+      onTap: () => setState(() => _type = label),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.orange : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.black54,
+            fontWeight: FontWeight.bold,
           ),
         ),
       ),

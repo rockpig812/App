@@ -12,23 +12,43 @@ class TransactionProvider with ChangeNotifier {
 
   List<TransactionModel> _transactions = [];
   StreamSubscription? _transactionSubscription;
+  String? _activeRoomId;
+  DateTime? _filterDate;
   
   // 存放本地端「尚未確認」的樂觀更新交易
   final Map<String, TransactionModel> _optimisticTransactions = {};
 
   List<TransactionModel> get transactions {
     // 合併遠端資料與本地樂觀更新資料
-    // 若 ID 相同，以遠端資料 (Snapshot) 為準，因為它包含正確的同步狀態 (hasPendingWrites)
     final remoteIds = _transactions.map((t) => t.id).toSet();
     final optimisticOnly = _optimisticTransactions.values
         .where((t) => !remoteIds.contains(t.id))
         .toList();
 
-    return [...optimisticOnly, ..._transactions];
+    final all = [...optimisticOnly, ..._transactions];
+
+    if (_filterDate != null) {
+      return all.where((t) {
+        return t.date.year == _filterDate!.year &&
+               t.date.month == _filterDate!.month &&
+               t.date.day == _filterDate!.day;
+      }).toList();
+    }
+    return all;
+  }
+
+  DateTime? get filterDate => _filterDate;
+
+  void setFilterDate(DateTime? date) {
+    _filterDate = date;
+    notifyListeners();
   }
 
   /// 開始監聽交易列表
   void startWatching(String roomId) {
+    if (_activeRoomId == roomId) return;
+    _activeRoomId = roomId;
+
     _transactionSubscription?.cancel();
     _transactionSubscription = _transactionRepository.watchTransactions(roomId).listen((data) {
       _transactions = data;
@@ -78,6 +98,7 @@ class TransactionProvider with ChangeNotifier {
     // 2. 背景發送請求 (Repository 內部不 await)
     try {
       _transactionRepository.addTransactionOptimistically(
+        id: txId, // 傳入相同的 ID
         roomId: roomId,
         payerId: payerId,
         amount: amount,
@@ -91,6 +112,36 @@ class TransactionProvider with ChangeNotifier {
       // 只有在呼叫失敗 (非網路失敗，因為 SDK 會處理網路) 時才移除
       _optimisticTransactions.remove(txId);
       notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// 更新交易
+  Future<void> updateTransaction({
+    required String roomId,
+    required String transactionId,
+    required String payerId,
+    required double oldAmount,
+    required double newAmount,
+    required String title,
+    required DateTime date,
+    String category = '其他',
+  }) async {
+    try {
+      await _transactionRepository.updateTransaction(
+        roomId: roomId,
+        transactionId: transactionId,
+        payerId: payerId,
+        oldAmount: oldAmount,
+        newAmount: newAmount,
+        newData: {
+          'title': title,
+          'amount': newAmount,
+          'date': date,
+          'category': category,
+        },
+      );
+    } catch (e) {
       rethrow;
     }
   }

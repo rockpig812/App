@@ -34,7 +34,7 @@ class RoomRepository {
 
     // 更新建立者的資料
     await _firestoreService.setUser(creatorId, {
-      'joined_room_ids': [roomId],
+      'joined_room_ids': FieldValue.arrayUnion([roomId]),
       'last_active_room_id': roomId,
     });
 

@@ -242,6 +242,20 @@ class SessionProvider with ChangeNotifier {
 
   Future<void> signOut() => _authService.signOut();
 
+  /// 切換當前活躍空間
+  Future<void> switchRoom(String roomId) async {
+    if (_firebaseUser == null) return;
+    try {
+      await _firestore.setUser(_firebaseUser!.uid, {
+        'last_active_room_id': roomId,
+      });
+      // 這裡不需要手動 notify，因為 _userDocSub 會監聽到變更並自動更新 _profile
+    } catch (e) {
+      _error = 'Switch Room Error: $e';
+      notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
     _authSub?.cancel();

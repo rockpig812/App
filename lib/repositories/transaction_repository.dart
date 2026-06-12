@@ -17,10 +17,11 @@ class TransactionRepository {
     required double amount,
     required String title,
     required DateTime date,
+    String? id, // 接收預先產生的 ID
     String category = '其他',
     String splitType = 'equal',
   }) {
-    final txId = _uuid.v4();
+    final txId = id ?? _uuid.v4();
     final tx = TransactionModel(
       id: txId,
       roomId: roomId,
@@ -47,6 +48,31 @@ class TransactionRepository {
     batch.commit().catchError((e) {
       print('Optimistic update failed in background: $e');
     });
+  }
+
+  /// 更新交易紀錄 (原子操作)
+  Future<void> updateTransaction({
+    required String roomId,
+    required String transactionId,
+    required String payerId,
+    required double oldAmount,
+    required double newAmount,
+    required Map<String, dynamic> newData,
+  }) async {
+    final batch = _firestoreService.firestore.batch();
+    final roomRef = _firestoreService.firestore.collection('rooms').doc(roomId);
+    final txRef = roomRef.collection('transactions').doc(transactionId);
+
+    batch.update(txRef, newData);
+    
+    final diff = newAmount - oldAmount;
+    if (diff != 0) {
+      batch.update(roomRef, {
+        'total_balance.$payerId': FieldValue.increment(diff),
+      });
+    }
+
+    return batch.commit();
   }
 
   /// 監聽交易列表 (包含 metadata)
