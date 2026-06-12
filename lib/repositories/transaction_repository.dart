@@ -7,9 +7,9 @@ class TransactionRepository {
   final FirestoreService _firestoreService = FirestoreService();
 
   /// 新增交易
-  /// 這會同時更新 Couple 的 total_balance
+  /// 這會同時更新 Room 的 total_balance
   Future<String> addTransaction({
-    required String coupleId,
+    required String roomId,
     required String payerId,
     required double amount,
     required String title,
@@ -19,7 +19,7 @@ class TransactionRepository {
   }) async {
     final tx = TransactionModel(
       id: '',
-      coupleId: coupleId,
+      coupleId: roomId, // TransactionModel still has coupleId field, let's keep it for now or rename later
       payerId: payerId,
       amount: amount,
       title: title,
@@ -30,7 +30,7 @@ class TransactionRepository {
 
     // CRITICAL: 原子操作（新增交易 + 增加 total_balance）
     return _firestoreService.addTransactionAndIncrementBalance(
-      coupleId: coupleId,
+      roomId: roomId,
       payerId: payerId,
       amount: amount,
       transactionData: tx.toMap(),
@@ -38,8 +38,8 @@ class TransactionRepository {
   }
 
   /// 監聽交易列表
-  Stream<List<TransactionModel>> watchTransactions(String coupleId) {
-    return _firestoreService.watchTransactions(coupleId).map((snapshot) {
+  Stream<List<TransactionModel>> watchTransactions(String roomId) {
+    return _firestoreService.watchTransactions(roomId).map((snapshot) {
       return snapshot.docs.map((doc) {
         return TransactionModel.fromMap(doc.data(), doc.id);
       }).toList();
@@ -47,15 +47,12 @@ class TransactionRepository {
   }
 
   /// 刪除交易
-  /// 這會同時減少 Couple 的 total_balance
   Future<void> deleteTransaction({
-    required String coupleId,
+    required String roomId,
     required String transactionId,
     required String payerId,
     required double amount,
   }) async {
-    // MVP: 先保留刪除交易不做 total_balance 回滾（避免歷史修正帶來複雜度）
-    // Phase 3 的核心是「新增」要原子且即時更新。
-    await _firestoreService.deleteTransaction(coupleId, transactionId);
+    await _firestoreService.deleteTransaction(roomId, transactionId);
   }
 }

@@ -39,6 +39,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _loginAnonymously() async {
+    try {
+      await context.read<SessionProvider>().signInAnonymously();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Guest login failed: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionProvider>();
@@ -100,6 +111,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   },
                   child: const Text('Register'),
                 ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: session.isLoading ? null : _loginAnonymously,
+                    icon: const Icon(Icons.person_outline),
+                    label: const Text('Login as Guest (Testing)'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -108,4 +130,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-

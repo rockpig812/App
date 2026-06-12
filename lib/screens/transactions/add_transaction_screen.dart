@@ -20,9 +20,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   bool _saving = false;
   String? _error;
 
-  // true = me, false = partner
-  bool _paidByMe = true;
-  String _selectedCategory = 'food'; // Default for Split Bill
+  // For MVP: Default to current user. In a group, we might want a list.
+  String? _selectedPayerId;
+  String _selectedCategory = 'food';
 
   final _txRepo = TransactionRepository();
 
@@ -48,8 +48,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Future<void> _save() async {
     final session = context.read<SessionProvider>();
     final myUid = session.firebaseUser?.uid;
-    final coupleId = session.profile?.currentCoupleId;
-    if (myUid == null || coupleId == null) return;
+    final roomId = session.profile?.lastActiveRoomId;
+    if (myUid == null || roomId == null) return;
 
     final title = _titleController.text.trim();
     final amount = double.tryParse(_amountController.text.trim());
@@ -59,13 +59,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       return;
     }
 
-    // 找 partner uid（從 couple doc 的 user_ids 取另一個）
-    // MVP：我們直接從 Firestore 讀 couple 一次（避免額外 provider 依賴）
-    final coupleSnap = await session.watchCurrentCoupleDoc().first; // one-shot
-    final userIds = List<String>.from(coupleSnap.data()?['user_ids'] ?? []);
-    final partnerUid = userIds.firstWhere((u) => u != myUid, orElse: () => myUid);
-
-    final payerId = _paidByMe ? myUid : partnerUid;
+    final payerId = _selectedPayerId ?? myUid;
 
     setState(() {
       _saving = true;
@@ -74,7 +68,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
     try {
       await _txRepo.addTransaction(
-        coupleId: coupleId,
+        roomId: roomId,
         payerId: payerId,
         amount: amount,
         title: title,
@@ -95,6 +89,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionProvider>();
+    final myUid = session.firebaseUser?.uid;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Add Expense')),
@@ -130,7 +125,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   label: Text('Date: ${_date.year}-${_date.month}-${_date.day}'),
                 ),
                 const SizedBox(height: 16),
-                const SizedBox(height: 12),
                 Text('Category', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 CategorySelector(
@@ -138,22 +132,43 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   onCategorySelected: (val) => setState(() => _selectedCategory = val),
                 ),
                 const SizedBox(height: 16),
+                
+                // For MVP: Simple toggle between Me and "Someone Else" (Partner)
+                // In the future, this should be a list of room members.
                 Text('Who paid?', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(value: true, label: Text('Me')),
-                    ButtonSegment(value: false, label: Text('Partner')),
-                  ],
-                  selected: {_paidByMe},
-                  onSelectionChanged: (s) {
-                    setState(() => _paidByMe = s.first);
+                StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: session.watchCurrentRoomDoc(),
+                  builder: (context, snapshot) {
+                    final data = snapshot.data?.data();
+                    final userIds = List<String>.from(data?['user_ids'] ?? []);
+                    
+                    if (userIds.length <= 1) {
+                      return const Text('Paid by: Me (Personal Mode)');
+                    }
+
+                    return SegmentedButton<String>(
+                      segments: [
+                        const ButtonSegment(value: 'me', label: Text('Me')),
+                        const ButtonSegment(value: 'other', label: Text('Someone Else')),
+                      ],
+                      selected: {(_selectedPayerId == null || _selectedPayerId == myUid) ? 'me' : 'other'},
+                      onSelectionChanged: (s) {
+                        if (s.first == 'me') {
+                          setState(() => _selectedPayerId = myUid);
+                        } else {
+                          // Pick the first non-me user as the "other" for now
+                          final otherUid = userIds.firstWhere((u) => u != myUid, orElse: () => myUid);
+                          setState(() => _selectedPayerId = otherUid);
+                        }
+                      },
+                    );
                   },
                 ),
+
                 const SizedBox(height: 16),
-                // Split type: 固定 50/50（MVP 隱藏邏輯，只顯示提示）
                 Text(
-                  'Split: Equal (50/50)',
+                  'Split: Equal among all members',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const Spacer(),
@@ -164,7 +179,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: (_saving || session.profile?.currentCoupleId == null)
+                    onPressed: (_saving || !session.isJoinedRoom)
                         ? null
                         : _save,
                     icon: const Icon(Icons.save),
@@ -179,4 +194,3 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 }
-

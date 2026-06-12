@@ -1,79 +1,97 @@
-/// Couple Model
-/// 對應 Firestore 的 couples 集合
-/// 這是整個 App 的核心資料結構
-class CoupleModel {
-  final String id;
-  final List<String> userIds; // 兩個使用者的 UID
-  final Map<String, double> totalBalance; // {uid1: paid_total, uid2: paid_total}
-  final double jointPotBalance; // 公基金總額
-  final String? inviteCode; // 6 位數邀請碼
+enum RoomType { personal, group }
 
-  CoupleModel({
+/// Room Model
+/// 對應 Firestore 的 rooms 集合
+class RoomModel {
+  final String id;
+  final String name;
+  final List<String> userIds;
+  final Map<String, double> totalBalance; // {uid: paid_total}
+  final double jointPotBalance;
+  final String? inviteCode;
+  final RoomType type;
+
+  RoomModel({
     required this.id,
+    required this.name,
     required this.userIds,
     required this.totalBalance,
     this.jointPotBalance = 0.0,
     this.inviteCode,
+    required this.type,
   });
 
-  factory CoupleModel.fromMap(Map<String, dynamic> map, String id) {
-    // Firestore 的 Map 需要轉換型別
+  factory RoomModel.fromMap(Map<String, dynamic> map, String id) {
     final balanceMap = map['total_balance'] as Map<String, dynamic>? ?? {};
     final balance = balanceMap.map(
       (key, value) => MapEntry(key, (value as num).toDouble()),
     );
 
-    return CoupleModel(
+    return RoomModel(
       id: id,
+      name: map['name'] ?? '',
       userIds: List<String>.from(map['user_ids'] ?? []),
       totalBalance: balance,
       jointPotBalance: (map['joint_pot_balance'] as num?)?.toDouble() ?? 0.0,
       inviteCode: map['invite_code'],
+      type: RoomType.values.firstWhere(
+        (e) => e.name == (map['type'] ?? 'group'),
+        orElse: () => RoomType.group,
+      ),
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
+      'name': name,
       'user_ids': userIds,
       'total_balance': totalBalance,
       'joint_pot_balance': jointPotBalance,
+      'type': type.name,
       if (inviteCode != null) 'invite_code': inviteCode,
     };
   }
 
   /// 計算淨餘額 (Net Balance)
-  /// 例如：如果 Alice 付了 $1000，Bob 付了 $500，則 Alice 應得 $250，Bob 欠 $250
-  /// 返回：{uid1: net_amount, uid2: net_amount}
+  /// 返回：{uid: net_amount}
   /// 正數表示「應得」，負數表示「應付」
   Map<String, double> calculateNetBalance() {
-    if (userIds.length != 2) return {};
+    if (userIds.isEmpty) return {};
+    if (userIds.length == 1) return {userIds[0]: 0.0};
 
-    final uid1 = userIds[0];
-    final uid2 = userIds[1];
-    final paid1 = totalBalance[uid1] ?? 0.0;
-    final paid2 = totalBalance[uid2] ?? 0.0;
-    final totalPaid = paid1 + paid2;
-    final perPerson = totalPaid / 2;
+    double totalPaid = 0.0;
+    for (var uid in userIds) {
+      totalPaid += totalBalance[uid] ?? 0.0;
+    }
 
-    return {
-      uid1: paid1 - perPerson, // 如果為正，表示 uid1 應得；負數表示應付
-      uid2: paid2 - perPerson,
-    };
+    final perPerson = totalPaid / userIds.length;
+    final Map<String, double> netBalances = {};
+
+    for (var uid in userIds) {
+      final paid = totalBalance[uid] ?? 0.0;
+      netBalances[uid] = paid - perPerson;
+    }
+
+    return netBalances;
   }
 
-  CoupleModel copyWith({
+  RoomModel copyWith({
     String? id,
+    String? name,
     List<String>? userIds,
     Map<String, double>? totalBalance,
     double? jointPotBalance,
     String? inviteCode,
+    RoomType? type,
   }) {
-    return CoupleModel(
+    return RoomModel(
       id: id ?? this.id,
+      name: name ?? this.name,
       userIds: userIds ?? this.userIds,
       totalBalance: totalBalance ?? this.totalBalance,
       jointPotBalance: jointPotBalance ?? this.jointPotBalance,
       inviteCode: inviteCode ?? this.inviteCode,
+      type: type ?? this.type,
     );
   }
 }

@@ -15,10 +15,10 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = context.watch<SessionProvider>();
     final myUid = session.firebaseUser?.uid;
-    final coupleId = session.profile?.currentCoupleId;
+    final roomId = session.profile?.lastActiveRoomId;
 
-    if (myUid == null || coupleId == null) {
-      return const Scaffold(body: Center(child: Text('Missing session/couple.')));
+    if (myUid == null || roomId == null) {
+      return const Scaffold(body: Center(child: Text('Missing session/room.')));
     }
 
     return Scaffold(
@@ -41,40 +41,48 @@ class DashboardScreen extends StatelessWidget {
         child: const Icon(Icons.add),
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: session.watchCurrentCoupleDoc(),
-        builder: (context, coupleSnap) {
-          if (!coupleSnap.hasData) {
+        stream: session.watchCurrentRoomDoc(),
+        builder: (context, roomSnap) {
+          if (!roomSnap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final couple = coupleSnap.data!;
-          final data = couple.data() ?? {};
+          final room = roomSnap.data!;
+          final data = room.data() ?? {};
           final userIds = List<String>.from(data['user_ids'] ?? []);
           final balanceRaw = (data['total_balance'] as Map<String, dynamic>?) ?? {};
           final totalBalance = balanceRaw.map(
             (k, v) => MapEntry(k, (v as num).toDouble()),
           );
 
-          if (userIds.length < 2) {
+          if (userIds.isEmpty) {
             return const Center(
-              child: Text('Waiting for your partner to join...'),
+              child: Text('No users in this room.'),
             );
           }
 
-          final partnerUid = userIds.firstWhere((u) => u != myUid, orElse: () => myUid);
-
-          // Net Balance Logic:
-          // myNet = (myPaid) - (totalPaid / 2)
+          // Net Balance Logic for Multiple Users:
+          // myNet = (myPaid) - (totalPaid / N)
           final myPaid = totalBalance[myUid] ?? 0.0;
-          final partnerPaid = totalBalance[partnerUid] ?? 0.0;
-          final totalPaid = myPaid + partnerPaid;
-          final myShare = totalPaid / 2;
+          double totalPaid = 0.0;
+          totalBalance.forEach((uid, paid) {
+            totalPaid += paid;
+          });
+          
+          final myShare = totalPaid / userIds.length;
           final myNet = myPaid - myShare;
 
           final positive = myNet >= 0;
           final absNet = myNet.abs();
-          final netText = positive
-              ? 'Partner owes you \$${_formatMoney(absNet)}'
-              : 'You owe Partner \$${_formatMoney(absNet)}';
+          
+          String netText;
+          if (userIds.length == 1) {
+            netText = 'Personal Mode: All expenses are yours.';
+          } else {
+            netText = positive
+                ? 'Others owe you \$${_formatMoney(absNet)}'
+                : 'You owe others \$${_formatMoney(absNet)}';
+          }
+          
           final netColor = positive ? Colors.green : Colors.red;
 
           return Padding(
@@ -93,7 +101,7 @@ class DashboardScreen extends StatelessWidget {
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: netColor.withValues(alpha: 0.12),
+                            color: netColor.withOpacity(0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Icon(
@@ -120,7 +128,7 @@ class DashboardScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'You paid \$${_formatMoney(myPaid)} • Partner paid \$${_formatMoney(partnerPaid)}',
+                                'You paid \$${_formatMoney(myPaid)} • Total room paid \$${_formatMoney(totalPaid)}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
@@ -135,7 +143,7 @@ class DashboardScreen extends StatelessWidget {
                 // Middle: transactions list
                 Expanded(
                   child: _TransactionList(
-                    coupleId: coupleId,
+                    roomId: roomId,
                     myUid: myUid,
                   ),
                 ),
@@ -149,11 +157,11 @@ class DashboardScreen extends StatelessWidget {
 }
 
 class _TransactionList extends StatelessWidget {
-  final String coupleId;
+  final String roomId;
   final String myUid;
 
   const _TransactionList({
-    required this.coupleId,
+    required this.roomId,
     required this.myUid,
   });
 
@@ -165,7 +173,7 @@ class _TransactionList extends StatelessWidget {
     final repo = TransactionRepository();
 
     return StreamBuilder(
-      stream: repo.watchTransactions(coupleId),
+      stream: repo.watchTransactions(roomId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -186,8 +194,8 @@ class _TransactionList extends StatelessWidget {
             final tx = items[index];
             final isMe = tx.payerId == myUid;
             final bubbleColor = isMe
-                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12)
-                : Theme.of(context).colorScheme.secondary.withValues(alpha: 0.12);
+                ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
+                : Theme.of(context).colorScheme.secondary.withOpacity(0.12);
 
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
@@ -233,7 +241,7 @@ class _TransactionList extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            isMe ? 'Paid by: Me' : 'Paid by: Partner',
+                            isMe ? 'Paid by: Me' : 'Paid by: Someone Else',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -249,4 +257,3 @@ class _TransactionList extends StatelessWidget {
     );
   }
 }
-

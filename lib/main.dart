@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'services/firestore_service.dart';
 import 'providers/session_provider.dart';
+import 'providers/joint_pot_provider.dart';
+import 'repositories/joint_pot_repository.dart';
+import 'repositories/room_repository.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/pairing_screen.dart';
 import 'screens/dashboard/dashboard_screen.dart';
@@ -22,6 +25,12 @@ Future<void> main() async {
       providers: [
         Provider(create: (_) => FirestoreService()),
         ChangeNotifierProvider(create: (_) => SessionProvider()),
+        ProxyProvider<FirestoreService, JointPotRepository>(
+          update: (_, service, __) => JointPotRepository(service),
+        ),
+        ProxyProvider<FirestoreService, RoomRepository>(
+          update: (_, service, __) => RoomRepository(),
+        ),
       ],
       child: const MyApp(),
     ),
@@ -57,12 +66,35 @@ class _RootRouter extends StatelessWidget {
       );
     }
 
+    if (session.error != null) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                const SizedBox(height: 16),
+                Text('Login Error: ${session.error}', textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () => session.signOut(),
+                  child: const Text('Back to Login'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (!session.isLoggedIn) {
       return const LoginScreen();
     }
 
-    // 登入成功，但 users/{uid}.current_couple_id 還是 null -> 進入配對流程
-    if (!session.isPaired) {
+    // 登入成功，但 joinedRoomIds 是空的 -> 進入配對流程
+    if (!session.isJoinedRoom) {
       return const PairingScreen();
     }
 
@@ -84,17 +116,24 @@ class _HomeShellState extends State<_HomeShell> {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionProvider>();
-    final coupleId = session.profile?.currentCoupleId ?? '';
+    final roomId = session.profile?.lastActiveRoomId ?? '';
 
-    // 若沒有 coupleId，理論上 _RootRouter 會擋住，但這裡多做一層保護
-    if (coupleId.isEmpty) {
-      return const Center(child: Text('Error: No Couple ID'));
+    // 若沒有 roomId，理論上 _RootRouter 會擋住，但這裡多做一層保護
+    if (roomId.isEmpty) {
+      return const Center(child: Text('Error: No Room ID'));
     }
 
     final pages = [
       const DashboardScreen(),
-      JointPotScreen(coupleId: coupleId),
-      GoalsScreen(coupleId: coupleId),
+      ChangeNotifierProvider(
+        key: ValueKey('room_$roomId'),
+        create: (context) => JointPotProvider(
+          repository: context.read<JointPotRepository>(),
+          roomId: roomId,
+        ),
+        child: const JointPotScreen(),
+      ),
+      GoalsScreen(roomId: roomId),
     ];
 
     return Scaffold(

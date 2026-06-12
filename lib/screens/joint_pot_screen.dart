@@ -2,58 +2,56 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../models/couple_model.dart';
-import '../models/transaction_model.dart';
 import '../models/savings_transaction_model.dart';
-import '../services/firestore_service.dart';
+import '../providers/joint_pot_provider.dart';
 import '../providers/session_provider.dart';
 import '../models/category_model.dart';
 import '../widgets/category_selector.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class JointPotScreen extends StatelessWidget {
-  const JointPotScreen({Key? key, required this.coupleId}) : super(key: key);
-
-  final String coupleId;
+  const JointPotScreen({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final firestoreService = context.read<FirestoreService>();
+    final provider = context.watch<JointPotProvider>();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Joint Pot'),
       ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: firestoreService.watchCouple(coupleId),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) return const Center(child: Text('Error'));
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-          final coupleData = snapshot.data!.data();
-          if (coupleData == null) return const Center(child: Text('Couple not found'));
-
-          final couple = CoupleModel.fromMap(coupleData, snapshot.data!.id);
-
-          return Column(
-            children: [
-              const SizedBox(height: 20),
-              // Balance Circle
-              _buildBalanceCircle(couple.jointPotBalance),
-              const SizedBox(height: 20),
-              // Transaction List
-              Expanded(
-                child: _buildTransactionList(context, firestoreService),
-              ),
-            ],
-          );
-        },
-      ),
+      body: _buildBody(context, provider),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showTransactionDialog(context),
         label: const Text('Deposit / Withdraw'),
         icon: const Icon(Icons.swap_horiz),
       ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, JointPotProvider provider) {
+    if (provider.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (provider.error != null) {
+      return Center(child: Text('Error: ${provider.error}'));
+    }
+
+    if (provider.room == null) {
+      return const Center(child: Text('Room not found'));
+    }
+
+    return Column(
+      children: [
+        const SizedBox(height: 20),
+        // Balance Circle
+        _buildBalanceCircle(provider.currentBalance),
+        const SizedBox(height: 20),
+        // Transaction List
+        Expanded(
+          child: _buildTransactionList(context, provider),
+        ),
+      ],
     );
   }
 
@@ -87,48 +85,36 @@ class JointPotScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTransactionList(BuildContext context, FirestoreService service) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: service.watchSavingsTransactions(coupleId),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) return const Center(child: Text('Error loading transactions'));
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+  Widget _buildTransactionList(BuildContext context, JointPotProvider provider) {
+    final transactions = provider.transactions;
 
-        final docs = snapshot.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return const Center(child: Text('No transactions yet'));
-        }
+    if (transactions.isEmpty) {
+      return const Center(child: Text('No transactions yet'));
+    }
 
-        return ListView.builder(
-          itemCount: docs.length,
-          itemBuilder: (context, index) {
-            final data = docs[index].data();
-            final transaction = SavingsTransactionModel.fromMap(data, docs[index].id);
-            final isDeposit = transaction.amount >= 0;
+    return ListView.builder(
+      itemCount: transactions.length,
+      itemBuilder: (context, index) {
+        final transaction = transactions[index];
+        final isDeposit = transaction.amount >= 0;
+        final category = TransactionCategory.getById(transaction.category);
 
-            final categoryId = transaction.category;
-            final category = TransactionCategory.getById(categoryId);
-
-            return ListTile(
-              leading: CircleAvatar(
-                backgroundColor: category.color.withOpacity(0.2),
-                child: Icon(category.icon, color: category.color),
-              ),
-              title: Text(transaction.title),
-              subtitle: Text(DateFormat('yyyy/MM/dd HH:mm').format(transaction.date)),
-              trailing: Text(
-                '${isDeposit ? '+' : ''}${transaction.amount.toStringAsFixed(0)}',
-                style: TextStyle(
-                  color: isDeposit ? Colors.green : Colors.red,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-              onLongPress: () => _showEditDeleteDialog(context, service, transaction),
-            );
-          },
+        return ListTile(
+          leading: CircleAvatar(
+            backgroundColor: category.color.withOpacity(0.2),
+            child: Icon(category.icon, color: category.color),
+          ),
+          title: Text(transaction.title),
+          subtitle: Text(DateFormat('yyyy/MM/dd HH:mm').format(transaction.date)),
+          trailing: Text(
+            '${isDeposit ? '+' : ''}${transaction.amount.toStringAsFixed(0)}',
+            style: TextStyle(
+              color: isDeposit ? Colors.green : Colors.red,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
+          onLongPress: () => _showEditDeleteDialog(context, provider, transaction),
         );
       },
     );
@@ -139,14 +125,13 @@ class JointPotScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       builder: (context) => _TransactionBottomSheet(
-        coupleId: coupleId,
         transaction: transaction,
       ),
     );
   }
 
   void _showEditDeleteDialog(
-      BuildContext context, FirestoreService service, SavingsTransactionModel transaction) {
+      BuildContext context, JointPotProvider provider, SavingsTransactionModel transaction) {
     showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(
@@ -166,7 +151,7 @@ class JointPotScreen extends StatelessWidget {
               title: const Text('Delete', style: TextStyle(color: Colors.red)),
               onTap: () {
                 Navigator.pop(context);
-                _confirmDelete(context, service, transaction);
+                _confirmDelete(context, provider, transaction);
               },
             ),
           ],
@@ -176,7 +161,7 @@ class JointPotScreen extends StatelessWidget {
   }
 
   void _confirmDelete(
-      BuildContext context, FirestoreService service, SavingsTransactionModel transaction) {
+      BuildContext context, JointPotProvider provider, SavingsTransactionModel transaction) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -191,10 +176,7 @@ class JointPotScreen extends StatelessWidget {
             onPressed: () async {
               Navigator.pop(context); // Close dialog
               try {
-                await service.deleteSavingsTransaction(
-                  coupleId: coupleId,
-                  transactionId: transaction.id,
-                );
+                await provider.deleteTransaction(transaction.id);
               } catch (e) {
                 if (context.mounted) {
                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -210,12 +192,10 @@ class JointPotScreen extends StatelessWidget {
 }
 
 class _TransactionBottomSheet extends StatefulWidget {
-  final String coupleId;
   final SavingsTransactionModel? transaction; // If null, create new mode
 
   const _TransactionBottomSheet({
     Key? key,
-    required this.coupleId,
     this.transaction,
   }) : super(key: key);
 
@@ -230,7 +210,7 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
   String _selectedCategory = 'household'; // Default for Pot
   bool _isDeposit = true;
   bool _isLoading = false;
-  bool _isRecurring = false; // "Repeat Monthly?"
+  bool _isRecurring = false;
 
   bool get _isEditing => widget.transaction != null;
 
@@ -332,10 +312,9 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
           TextField(
             controller: _amountController,
             decoration: const InputDecoration(labelText: 'Amount'),
-            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
           ),
           const SizedBox(height: 10),
-          // Recurring Toggle (Only for withdrawals/spending typically, but let's allow all)
           SwitchListTile(
             title: const Text('Repeat Monthly?'),
             subtitle: const Text('Useful for bills like Rent/Netflix'),
@@ -347,7 +326,11 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
           ElevatedButton(
             onPressed: _isLoading ? null : _submit,
             child: _isLoading
-                ? const CircularProgressIndicator()
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : Text(_isEditing ? 'Save Changes' : 'Confirm'),
           ),
           const SizedBox(height: 20),
@@ -394,25 +377,31 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
     setState(() => _isLoading = true);
 
     try {
+      final provider = context.read<JointPotProvider>();
       final user = context.read<SessionProvider>().firebaseUser;
-      final service = context.read<FirestoreService>();
       final finalAmount = _isDeposit ? amount : -amount;
 
-      final commonData = {
-        'amount': finalAmount,
-        'title': title,
-        'date': Timestamp.fromDate(_selectedDate),
-        'category': _selectedCategory,
-        'is_recurring': _isRecurring,
-        'recurrence_interval': _isRecurring ? 'monthly' : null,
-      };
-
       if (_isEditing) {
-        await service.updateSavingsTransaction(
-          coupleId: widget.coupleId,
-          transactionId: widget.transaction!.id,
-          newData: commonData,
-        );
+        final newData = {
+          'amount': finalAmount,
+          'title': title,
+          'date': _selectedDate, // Provider/Repo will handle Timestamp conversion if needed, but Repo uses FirestoreService
+          'category': _selectedCategory,
+          'is_recurring': _isRecurring,
+          'recurrence_interval': _isRecurring ? 'monthly' : null,
+        };
+        // FirestoreService expects Timestamp, let's check Repo. 
+        // Repo just passes to FirestoreService. 
+        // FirestoreService's updateSavingsTransaction takes Map<String, dynamic> newData.
+        // I should ensure the map has Timestamp if FirestoreService doesn't handle DateTime.
+        // Actually, FirestoreService's updateSavingsTransaction uses `txn.update(txRef, newData);`
+        // Firestore SDK handles DateTime if it's not specifically a Map of primitives.
+        // Wait, FirestoreService uses Timestamp.fromDate in other places.
+        
+        final dataWithTimestamp = Map<String, dynamic>.from(newData);
+        dataWithTimestamp['date'] = Timestamp.fromDate(_selectedDate);
+
+        await provider.updateTransaction(widget.transaction!.id, dataWithTimestamp);
       } else {
         final transaction = SavingsTransactionModel(
           id: '',
@@ -426,10 +415,7 @@ class _TransactionBottomSheetState extends State<_TransactionBottomSheet> {
           recurrenceInterval: _isRecurring ? 'monthly' : null,
         );
 
-        await service.performSavingsTransaction(
-          coupleId: widget.coupleId,
-          transactionData: transaction.toMap(),
-        );
+        await provider.addTransaction(transaction);
       }
 
       if (mounted) Navigator.pop(context);

@@ -3,15 +3,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../models/goal_model.dart';
-import '../models/couple_model.dart'; // Needed to check balance for achieving
+import '../models/room_model.dart'; // Needed to check balance for achieving
 import '../services/firestore_service.dart';
 import '../providers/session_provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class GoalsScreen extends StatelessWidget {
-  const GoalsScreen({Key? key, required this.coupleId}) : super(key: key);
+  const GoalsScreen({Key? key, required this.roomId}) : super(key: key);
 
-  final String coupleId;
+  final String roomId;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +29,7 @@ class GoalsScreen extends StatelessWidget {
           ),
         ),
         body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: firestoreService.watchGoals(coupleId),
+          stream: firestoreService.watchGoals(roomId),
           builder: (context, snapshot) {
             if (snapshot.hasError) return const Center(child: Text('Error'));
             if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
@@ -41,8 +40,6 @@ class GoalsScreen extends StatelessWidget {
             final activeGoals = allGoals.where((g) => g.status == 'active').toList();
             final achievedGoals = allGoals.where((g) => g.status == 'achieved').toList();
 
-            // Sort Active by creation or priority? Default is fine.
-            // Sort Achieved by achievedDate desc?
             achievedGoals.sort((a, b) {
               if (a.achievedDate == null || b.achievedDate == null) return 0;
               return b.achievedDate!.compareTo(a.achievedDate!);
@@ -71,7 +68,7 @@ class GoalsScreen extends StatelessWidget {
     return ListView.builder(
       itemCount: goals.length,
       itemBuilder: (context, index) {
-        return _GoalCard(goal: goals[index], coupleId: coupleId);
+        return _GoalCard(goal: goals[index], roomId: roomId);
       },
     );
   }
@@ -79,16 +76,16 @@ class GoalsScreen extends StatelessWidget {
   void _showAddGoalDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => _AddGoalDialog(coupleId: coupleId),
+      builder: (context) => _AddGoalDialog(roomId: roomId),
     );
   }
 }
 
 class _GoalCard extends StatelessWidget {
   final GoalModel goal;
-  final String coupleId;
+  final String roomId;
 
-  const _GoalCard({Key? key, required this.goal, required this.coupleId}) : super(key: key);
+  const _GoalCard({Key? key, required this.goal, required this.roomId}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -153,12 +150,11 @@ class _GoalCard extends StatelessWidget {
   }
 
   Future<void> _achieveGoal(BuildContext context, FirestoreService service, String userId) async {
-    // 1. Check Balance (Optimistic check, real check in transaction)
     try {
-      final coupleSnap = await service.firestore.collection('couples').doc(coupleId).get();
-      final couple = CoupleModel.fromMap(coupleSnap.data()!, coupleSnap.id);
+      final roomSnap = await service.firestore.collection('rooms').doc(roomId).get();
+      final room = RoomModel.fromMap(roomSnap.data()!, roomSnap.id);
       
-      if (couple.jointPotBalance < goal.targetAmount) {
+      if (room.jointPotBalance < goal.targetAmount) {
         if (context.mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Insufficient funds in the Pot!')),
@@ -168,7 +164,7 @@ class _GoalCard extends StatelessWidget {
       }
 
       await service.achieveGoal(
-        coupleId: coupleId,
+        roomId: roomId,
         goalId: goal.id,
         targetAmount: goal.targetAmount,
         goalTitle: goal.title,
@@ -184,7 +180,7 @@ class _GoalCard extends StatelessWidget {
   Future<void> _undoAchieve(BuildContext context, FirestoreService service, String userId) async {
     try {
       await service.undoAchieveGoal(
-        coupleId: coupleId,
+        roomId: roomId,
         goalId: goal.id,
         amount: goal.targetAmount,
         goalTitle: goal.title,
@@ -199,8 +195,8 @@ class _GoalCard extends StatelessWidget {
 }
 
 class _AddGoalDialog extends StatefulWidget {
-  final String coupleId;
-  const _AddGoalDialog({Key? key, required this.coupleId}) : super(key: key);
+  final String roomId;
+  const _AddGoalDialog({Key? key, required this.roomId}) : super(key: key);
 
   @override
   State<_AddGoalDialog> createState() => _AddGoalDialogState();
@@ -253,13 +249,13 @@ class _AddGoalDialogState extends State<_AddGoalDialog> {
       final service = context.read<FirestoreService>();
       final goal = GoalModel(
         id: '',
-        coupleId: widget.coupleId,
+        coupleId: widget.roomId,
         title: title,
         targetAmount: amount,
         status: 'active',
       );
 
-      await service.addGoal(widget.coupleId, goal.toMap());
+      await service.addGoal(widget.roomId, goal.toMap());
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));

@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/session_provider.dart';
+import '../../repositories/room_repository.dart';
+import '../../models/room_model.dart';
 
 class PairingScreen extends StatefulWidget {
   const PairingScreen({super.key});
@@ -18,10 +20,10 @@ class _PairingScreenState extends State<PairingScreen> {
   final _joinCodeController = TextEditingController();
 
   bool _busy = false;
-  String? _createdCoupleId;
+  String? _createdRoomId;
   String? _createdInviteCode;
   String? _error;
-  bool _pairedSynced = false;
+  bool _joinedSynced = false;
 
   @override
   void dispose() {
@@ -29,26 +31,15 @@ class _PairingScreenState extends State<PairingScreen> {
     super.dispose();
   }
 
-  String _random6DigitCode() {
-    final r = Random.secure();
-    return (100000 + r.nextInt(900000)).toString();
+  Future<void> _createPersonalSpace() async {
+    await _createNewSpace(RoomType.personal, 'My Personal Space');
   }
 
-  Future<String> _generateUniqueInviteCode() async {
-    // 6 位數碰撞機率很低，但還是做個簡單防撞（最多重試 8 次）
-    for (var i = 0; i < 8; i++) {
-      final code = _random6DigitCode();
-      final q = await FirebaseFirestore.instance
-          .collection('couples')
-          .where('invite_code', isEqualTo: code)
-          .limit(1)
-          .get();
-      if (q.docs.isEmpty) return code;
-    }
-    throw Exception('Failed to generate unique invite code. Try again.');
+  Future<void> _createGroupSpace() async {
+    await _createNewSpace(RoomType.group, 'Our Group Space');
   }
 
-  Future<void> _createNewSpace() async {
+  Future<void> _createNewSpace(RoomType type, String name) async {
     final uid = context.read<SessionProvider>().firebaseUser?.uid;
     if (uid == null) return;
 
@@ -58,16 +49,16 @@ class _PairingScreenState extends State<PairingScreen> {
     });
 
     try {
-      final code = await _generateUniqueInviteCode();
-      final docRef = await FirebaseFirestore.instance.collection('couples').add({
-        'user_ids': [uid],
-        'total_balance': {uid: 0.0},
-        'invite_code': code,
-      });
+      final repo = context.read<RoomRepository>();
+      final result = await repo.createRoom(
+        creatorId: uid,
+        name: name,
+        type: type,
+      );
 
       setState(() {
-        _createdCoupleId = docRef.id;
-        _createdInviteCode = code;
+        _createdRoomId = result['roomId'];
+        _createdInviteCode = result['inviteCode'];
       });
     } catch (e) {
       setState(() => _error = e.toString());
@@ -92,62 +83,19 @@ class _PairingScreenState extends State<PairingScreen> {
     });
 
     try {
-      final q = await FirebaseFirestore.instance
-          .collection('couples')
-          .where('invite_code', isEqualTo: code)
-          .limit(1)
-          .get();
+      final repo = context.read<RoomRepository>();
+      final roomId = await repo.joinRoom(inviteCode: code, userId: uid);
 
-      if (q.docs.isEmpty) {
-        throw Exception('No couple space found for this code.');
+      if (roomId == null) {
+        throw Exception('No space found for this code.');
       }
-
-      final coupleDoc = q.docs.first;
-      final coupleId = coupleDoc.id;
-      final data = coupleDoc.data();
-      final userIds = List<String>.from(data['user_ids'] ?? []);
-
-      if (userIds.length >= 2 && !userIds.contains(uid)) {
-        throw Exception('This couple space is already full.');
-      }
-
-      final batch = FirebaseFirestore.instance.batch();
-
-      // 1) 更新 couple 文件：加入 user_ids + 初始化 total_balance.{uid}
-      final coupleRef = FirebaseFirestore.instance.collection('couples').doc(coupleId);
-      final coupleUpdates = <String, dynamic>{
-        'user_ids': FieldValue.arrayUnion([uid]),
-      };
-      if (!userIds.contains(uid)) {
-        coupleUpdates['total_balance.$uid'] = 0.0;
-      }
-      batch.update(coupleRef, coupleUpdates);
-
-      // 2) 更新「自己的」current_couple_id
-      // （較符合常見 Firestore rules：只能更新自己的 users/{uid} 文件）
-      final myUserRef = FirebaseFirestore.instance.collection('users').doc(uid);
-      batch.set(myUserRef, {'current_couple_id': coupleId}, SetOptions(merge: true));
-
-      await batch.commit();
+      
+      // SessionProvider is watching user doc, so it should auto-update.
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<void> _ensurePairedForCreator(List<String> userIds) async {
-    // 當 creator 的畫面偵測到 user_ids == 2 時，保險起見同步 current_couple_id
-    final coupleId = _createdCoupleId;
-    if (coupleId == null || _pairedSynced) return;
-    _pairedSynced = true;
-
-    final uid = context.read<SessionProvider>().firebaseUser?.uid;
-    if (uid == null) return;
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .set({'current_couple_id': coupleId}, SetOptions(merge: true));
   }
 
   @override
@@ -156,7 +104,7 @@ class _PairingScreenState extends State<PairingScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pairing'),
+        title: const Text('Spaces'),
         actions: [
           TextButton(
             onPressed: _busy ? null : () => context.read<SessionProvider>().signOut(),
@@ -175,13 +123,15 @@ class _PairingScreenState extends State<PairingScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Not paired yet',
+                    'Welcome to Spaces',
                     style: Theme.of(context).textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Your UID: $uid',
+                    'UID: $uid',
                     style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
                   const TabBar(
@@ -204,6 +154,7 @@ class _PairingScreenState extends State<PairingScreen> {
                     Text(
                       _error!,
                       style: const TextStyle(color: Colors.red),
+                      textAlign: TextAlign.center,
                     ),
                   ],
                 ],
@@ -216,22 +167,36 @@ class _PairingScreenState extends State<PairingScreen> {
   }
 
   Widget _buildCreateTab() {
-    final createdCoupleId = _createdCoupleId;
+    final createdRoomId = _createdRoomId;
     final createdInviteCode = _createdInviteCode;
 
-    if (createdCoupleId == null || createdInviteCode == null) {
+    if (createdRoomId == null || createdInviteCode == null) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('Create a new couple space and share the code.'),
-          const SizedBox(height: 16),
+          const Text('Start your financial journey.'),
+          const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _busy ? null : _createNewSpace,
-              icon: const Icon(Icons.favorite),
-              label: _busy ? const Text('Creating...') : const Text('Create New Space'),
+              onPressed: _busy ? null : _createPersonalSpace,
+              icon: const Icon(Icons.person),
+              label: _busy ? const Text('Creating...') : const Text('Personal Space'),
             ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _createGroupSpace,
+              icon: const Icon(Icons.group),
+              label: const Text('Group Space'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Groups can be shared with others using a code.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
         ],
       );
@@ -264,30 +229,34 @@ class _PairingScreenState extends State<PairingScreen> {
           ],
         ),
         const SizedBox(height: 24),
-        const Text('Waiting for your partner to join...'),
+        const Text('Waiting for others to join...'),
         const SizedBox(height: 12),
         StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance.collection('couples').doc(createdCoupleId).snapshots(),
+          stream: FirebaseFirestore.instance.collection('rooms').doc(createdRoomId).snapshots(),
           builder: (context, snapshot) {
             final data = snapshot.data?.data();
             final userIds = List<String>.from(data?['user_ids'] ?? []);
 
-            final ready = userIds.length == 2;
-            if (ready) {
-              // 保險：確保兩邊 users 文件都有 current_couple_id
-              _ensurePairedForCreator(userIds);
-            }
+            final ready = userIds.length > 1;
 
             return Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(ready ? Icons.check_circle : Icons.hourglass_bottom),
                 const SizedBox(width: 8),
-                Text(ready ? 'Paired!' : 'Not paired yet'),
+                Text(ready ? 'Others Joined!' : 'Waiting...'),
               ],
             );
           },
         ),
+        const SizedBox(height: 20),
+        TextButton(
+          onPressed: () {
+            // Force refresh session to enter the shell if it doesn't auto-update
+            // But usually StreamBuilder in SessionProvider handles this.
+          },
+          child: const Text('Go to Space'),
+        )
       ],
     );
   }
@@ -320,4 +289,3 @@ class _PairingScreenState extends State<PairingScreen> {
     );
   }
 }
-

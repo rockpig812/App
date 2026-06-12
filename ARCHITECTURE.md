@@ -8,46 +8,55 @@ lib/
 ├── firebase_options.dart        # Firebase 設定檔
 │
 ├── models/                      # 資料模型 (Data Models)
-│   ├── user_model.dart
-│   ├── couple_model.dart
+│   ├── user_model.dart          # 支援 joinedRoomIds, lastActiveRoomId
+│   ├── room_model.dart          # 核心空間模型 (個人/群組)
 │   ├── transaction_model.dart
 │   ├── goal_model.dart
 │   └── contribution_model.dart
 │
 ├── services/                    # 低階服務層 (Low-level Services)
-│   └── firestore_service.dart   # Firestore CRUD 操作
+│   └── firestore_service.dart   # Firestore CRUD 操作 (使用 rooms 集合)
 │
 ├── repositories/                # 業務邏輯層 (Business Logic)
 │   ├── auth_repository.dart
-│   ├── couple_repository.dart
+│   ├── room_repository.dart     # 替代 couple_repository
 │   ├── transaction_repository.dart
 │   └── goal_repository.dart
 │
 ├── providers/                   # 狀態管理 (State Management)
 │   ├── auth_provider.dart
-│   ├── couple_provider.dart
+│   ├── room_provider.dart       # 替代 couple_provider
+│   ├── joint_pot_provider.dart
 │   ├── transaction_provider.dart
 │   └── goal_provider.dart
 │
-├── screens/                     # 頁面 (待實作)
+├── screens/                     # 頁面
 │   ├── auth/
 │   │   ├── login_screen.dart
 │   │   └── signup_screen.dart
 │   ├── onboarding/
-│   │   ├── create_couple_screen.dart
-│   │   └── join_couple_screen.dart
+│   │   ├── create_room_screen.dart
+│   │   └── join_room_screen.dart
 │   ├── dashboard/
 │   │   └── dashboard_screen.dart
 │   └── goals/
 │       └── goals_screen.dart
 │
-└── widgets/                     # 可重用元件 (待實作)
+└── widgets/                     # 可重用元件
     ├── transaction_list_item.dart
     ├── goal_card.dart
     └── balance_card.dart
 ```
 
-## 🏗️ Architecture Layers
+## 🛠️ Architecture Layers
+
+### 0. **Core Mandate: Offline-First & Optimistic Updates**
+- **Principle**: UI MUST update immediately upon user action. Do not wait for server response.
+- **Implementation**:
+  - **Client-Side IDs**: All models must use `Uuid().v4()` for IDs before sending to Firestore.
+  - **Sync State**: Models should include an `isSyncing` flag (default true) to indicate local-only status.
+  - **Event Sourcing**: Prefer syncing atomic "Events" (Transactions) rather than absolute "States" (Balances) to avoid conflicts.
+  - **Persistence**: Firestore offline persistence must be enabled in `main.dart`.
 
 ### 1. **Models Layer** (`lib/models/`)
 - **用途**: 定義資料結構，對應 Firestore 的文件格式
@@ -96,15 +105,18 @@ Firestore
 ### Collections:
 1. **users** - 使用者資料
    - `uid` (document ID)
-   - `name`, `email`, `current_couple_id`
+   - `name`, `email`, `joined_room_ids` (array), `last_active_room_id`
 
-2. **couples** - 情侶配對
+2. **rooms** - 空間 (個人或群組)
    - `id` (document ID)
+   - `name` (string)
    - `user_ids` (array)
    - `total_balance` (map: {uid: amount})
    - `invite_code` (6-digit string)
+   - `type` (personal | group)
    - **Sub-collections:**
-     - `transactions/` - 交易紀錄
+     - `transactions/` - 交易紀錄 (支出)
+     - `savings_transactions/` - 公基金交易 (存入/領取)
      - `goals/` - 儲蓄目標
        - `contributions/` - 存入紀錄
 
@@ -112,7 +124,7 @@ Firestore
 
 1. **實作 Authentication & Onboarding Screens**
    - Login/Signup 頁面
-   - 建立/加入 Couple Space 頁面
+   - 建立/加入 Room 頁面
 
 2. **實作 Dashboard**
    - 顯示淨餘額 (Net Balance)
