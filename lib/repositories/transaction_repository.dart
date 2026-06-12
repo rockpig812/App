@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
 import '../models/transaction_model.dart';
 import '../services/firestore_service.dart';
 
@@ -5,10 +7,11 @@ import '../services/firestore_service.dart';
 /// 處理所有與「交易紀錄」相關的業務邏輯
 class TransactionRepository {
   final FirestoreService _firestoreService = FirestoreService();
+  final _uuid = const Uuid();
 
-  /// 新增交易
-  /// 這會同時更新 Room 的 total_balance
-  Future<String> addTransaction({
+  /// 樂觀新增交易 (零延遲)
+  /// 利用 Firestore 的 Persistence 機制，不 await 結果
+  void addTransactionOptimistically({
     required String roomId,
     required String payerId,
     required double amount,
@@ -16,10 +19,11 @@ class TransactionRepository {
     required DateTime date,
     String category = '其他',
     String splitType = 'equal',
-  }) async {
+  }) {
+    final txId = _uuid.v4();
     final tx = TransactionModel(
-      id: '',
-      coupleId: roomId, // TransactionModel still has coupleId field, let's keep it for now or rename later
+      id: txId,
+      roomId: roomId,
       payerId: payerId,
       amount: amount,
       title: title,
@@ -28,20 +32,30 @@ class TransactionRepository {
       splitType: splitType,
     );
 
-    // CRITICAL: 原子操作（新增交易 + 增加 total_balance）
-    return _firestoreService.addTransactionAndIncrementBalance(
-      roomId: roomId,
-      payerId: payerId,
-      amount: amount,
-      transactionData: tx.toMap(),
-    );
+    // 使用 WriteBatch 確保原子性，但不 await
+    final batch = _firestoreService.firestore.batch();
+    
+    final roomRef = _firestoreService.firestore.collection('rooms').doc(roomId);
+    final txRef = roomRef.collection('transactions').doc(txId);
+
+    batch.set(txRef, tx.toMap());
+    batch.update(roomRef, {
+      'total_balance.$payerId': FieldValue.increment(amount),
+    });
+
+    // 這裡不 await，讓 Firestore SDK 在背景處理排隊與同步
+    batch.commit().catchError((e) {
+      print('Optimistic update failed in background: $e');
+    });
   }
 
-  /// 監聽交易列表
+  /// 監聽交易列表 (包含 metadata)
   Stream<List<TransactionModel>> watchTransactions(String roomId) {
     return _firestoreService.watchTransactions(roomId).map((snapshot) {
       return snapshot.docs.map((doc) {
-        return TransactionModel.fromMap(doc.data(), doc.id);
+        // hasPendingWrites 為 true 代表資料還在本地緩存中，尚未同步到 Server
+        final isSyncing = doc.metadata.hasPendingWrites;
+        return TransactionModel.fromMap(doc.data(), doc.id, isSyncing: isSyncing);
       }).toList();
     });
   }
@@ -53,6 +67,16 @@ class TransactionRepository {
     required String payerId,
     required double amount,
   }) async {
-    await _firestoreService.deleteTransaction(roomId, transactionId);
+    // 刪除同樣建議做成原子操作
+    final batch = _firestoreService.firestore.batch();
+    final roomRef = _firestoreService.firestore.collection('rooms').doc(roomId);
+    final txRef = roomRef.collection('transactions').doc(transactionId);
+
+    batch.delete(txRef);
+    batch.update(roomRef, {
+      'total_balance.$payerId': FieldValue.increment(-amount),
+    });
+
+    return batch.commit();
   }
 }

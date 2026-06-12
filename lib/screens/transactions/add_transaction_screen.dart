@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../providers/session_provider.dart';
-import '../../repositories/transaction_repository.dart';
+import '../../providers/transaction_provider.dart';
 import '../../widgets/category_selector.dart';
 
 class AddTransactionScreen extends StatefulWidget {
@@ -23,8 +24,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   // For MVP: Default to current user. In a group, we might want a list.
   String? _selectedPayerId;
   String _selectedCategory = 'food';
-
-  final _txRepo = TransactionRepository();
 
   @override
   void dispose() {
@@ -47,6 +46,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   Future<void> _save() async {
     final session = context.read<SessionProvider>();
+    final txProvider = context.read<TransactionProvider>();
     final myUid = session.firebaseUser?.uid;
     final roomId = session.profile?.lastActiveRoomId;
     if (myUid == null || roomId == null) return;
@@ -67,7 +67,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     });
 
     try {
-      await _txRepo.addTransaction(
+      await txProvider.addTransaction(
         roomId: roomId,
         payerId: payerId,
         amount: amount,
@@ -158,7 +158,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                           setState(() => _selectedPayerId = myUid);
                         } else {
                           // Pick the first non-me user as the "other" for now
-                          final otherUid = userIds.firstWhere((u) => u != myUid, orElse: () => myUid);
+                          final otherUid = userIds.firstWhere((u) => u != myUid, orElse: () => myUid as String);
                           setState(() => _selectedPayerId = otherUid);
                         }
                       },

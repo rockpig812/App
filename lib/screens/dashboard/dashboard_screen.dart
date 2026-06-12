@@ -3,13 +3,30 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/session_provider.dart';
-import '../../repositories/transaction_repository.dart';
+import '../../providers/transaction_provider.dart';
 import '../transactions/add_transaction_screen.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
   String _formatMoney(double v) => v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 2);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final session = context.read<SessionProvider>();
+      final roomId = session.profile?.lastActiveRoomId;
+      if (roomId != null) {
+        context.read<TransactionProvider>().startWatching(roomId);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -98,30 +115,25 @@ class DashboardScreen extends StatelessWidget {
                     child: Row(
                       children: [
                         Container(
-                          width: 40,
-                          height: 40,
+                          width: 48,
+                          height: 48,
                           decoration: BoxDecoration(
-                            color: netColor.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(12),
+                            color: netColor.withOpacity(0.1),
+                            shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            positive ? Icons.trending_up : Icons.trending_down,
+                            positive ? Icons.arrow_upward : Icons.arrow_downward,
                             color: netColor,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Net Balance',
-                                style: Theme.of(context).textTheme.labelLarge,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
                                 netText,
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                       color: netColor,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -170,88 +182,85 @@ class _TransactionList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final repo = TransactionRepository();
+    final provider = context.watch<TransactionProvider>();
+    final items = provider.transactions;
 
-    return StreamBuilder(
-      stream: repo.watchTransactions(roomId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(child: Text('Failed to load: ${snapshot.error}'));
-        }
+    if (items.isEmpty) {
+      return const Center(child: Text('No transactions yet. Tap + to add one.'));
+    }
 
-        final items = snapshot.data ?? [];
-        if (items.isEmpty) {
-          return const Center(child: Text('No transactions yet. Tap + to add one.'));
-        }
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 80),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final tx = items[index];
+        final isMe = tx.payerId == myUid;
+        final bubbleColor = isMe
+            ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
+            : Theme.of(context).colorScheme.secondary.withOpacity(0.12);
 
-        return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 80),
-          itemCount: items.length,
-          itemBuilder: (context, index) {
-            final tx = items[index];
-            final isMe = tx.payerId == myUid;
-            final bubbleColor = isMe
-                ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
-                : Theme.of(context).colorScheme.secondary.withOpacity(0.12);
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                mainAxisAlignment:
-                    isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-                children: [
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 520),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: bubbleColor,
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(16),
-                          topRight: const Radius.circular(16),
-                          bottomLeft: Radius.circular(isMe ? 16 : 4),
-                          bottomRight: Radius.circular(isMe ? 4 : 16),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            mainAxisAlignment:
+                isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: bubbleColor,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(isMe ? 16 : 4),
+                      bottomRight: Radius.circular(isMe ? 4 : 16),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
                             tx.title,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Text(
-                                '\$${_formatMoney(tx.amount)}',
-                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                _formatDate(tx.date),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
+                          if (tx.isSyncing) ...[
+                            const SizedBox(width: 6),
+                            const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
                           Text(
-                            isMe ? 'Paid by: Me' : 'Paid by: Someone Else',
+                            '\$${_formatMoney(tx.amount)}',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _formatDate(tx.date),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isMe ? 'Paid by: Me' : 'Paid by: Someone Else',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            );
-          },
+            ],
+          ),
         );
       },
     );
